@@ -11,7 +11,11 @@ def Integrate_Field_Fluid_Domain(field):
     dyEUL = grid.step[1]
     return integrate_trapz(field.data, dxEUL, dyEUL)
 
-def IBM_force_GENERAL(field, Xi, particle_center, geom_param, Grid_p, shape_fn, discrete_fn, surface_fn, dx_dt, domega_dt, rotation, dt, sigma=1.0):
+def IBM_force_GENERAL(
+    field, Xi, particle_center, geom_param, Grid_p,
+    shape_fn, discrete_fn, surface_fn, dx_dt, domega_dt, rotation, dt,
+    sigma=1.0  # <-- add sigma argument for surface tension strength
+):
     grid = field.grid
     offset = field.offset
     X, Y = grid.mesh(offset)
@@ -19,17 +23,23 @@ def IBM_force_GENERAL(field, Xi, particle_center, geom_param, Grid_p, shape_fn, 
     dyEUL = grid.step[1]
     current_t = field.bc.time_stamp
     xp0, yp0 = shape_fn(geom_param, Grid_p)
-
-    # Rotated and translated marker positions (boundary points)
-    xp = (xp0) * jnp.cos(rotation(current_t)) - (yp0) * jnp.sin(rotation(current_t)) + particle_center[0]
-    yp = (xp0) * jnp.sin(rotation(current_t)) + (yp0) * jnp.cos(rotation(current_t)) + particle_center[1]
-    surface_coord = [(xp) / dxEUL - offset[0], (yp) / dyEUL - offset[1]]
+    xp = (xp0)*jnp.cos(rotation(current_t)) - (yp0)*jnp.sin(rotation(current_t)) + particle_center[0]
+    yp = (xp0)*jnp.sin(rotation(current_t)) + (yp0)*jnp.cos(rotation(current_t)) + particle_center[1]
+    surface_coord = [(xp)/dxEUL - offset[0], (yp)/dyEUL - offset[1]]
     velocity_at_surface = surface_fn(field, xp, yp)
 
-    # Penalty force (per direction)
-    force_penalty = (UP - velocity_at_surface) / dt  # shape [N]
+    # Penalty force (as before)
+    if Xi == 0:
+        position_r = -(yp - particle_center[1])
+    elif Xi == 1:
+        position_r = (xp - particle_center[0])
 
-    # --- Surface Tension Force Calculation ---
+    U0 = dx_dt(current_t)
+    Omega = domega_dt(current_t)
+    UP = U0[Xi] + Omega * position_r
+    force_penalty = (UP - velocity_at_surface) / dt
+
+    # --- Surface tension force addition ---
     N = xp.shape[0]
     i_next = jnp.roll(jnp.arange(N), -1)
     i_prev = jnp.roll(jnp.arange(N), 1)
@@ -37,13 +47,12 @@ def IBM_force_GENERAL(field, Xi, particle_center, geom_param, Grid_p, shape_fn, 
     l_im1 = jnp.stack([xp - xp[i_prev], yp - yp[i_prev]], axis=1)
     l_i_norm = l_i / jnp.linalg.norm(l_i, axis=1, keepdims=True)
     l_im1_norm = l_im1 / jnp.linalg.norm(l_im1, axis=1, keepdims=True)
-    force_sigma = -sigma * (l_i_norm - l_im1_norm)  # [N, 2]
-    force_surface = force_sigma[:, Xi]  # [N], select the component
+    force_sigma = -sigma * (l_i_norm - l_im1_norm)  # shape [N, 2]
+    force_tension = force_sigma[:, Xi]  # shape [N], select x or y component
 
-    # **Sum both forces**
-    force = force_penalty + force_surface  # [N]
+    # --- Total force ---
+    force = force_penalty + force_tension
 
-    # Arc lengths for spreading
     x_i = jnp.roll(xp, -1)
     y_i = jnp.roll(yp, -1)
     dxL = x_i - xp
