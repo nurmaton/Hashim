@@ -14,7 +14,7 @@ def Integrate_Field_Fluid_Domain(field):
 def IBM_force_GENERAL(
     field, Xi, particle_center, geom_param, Grid_p,
     shape_fn, discrete_fn, surface_fn, dx_dt, domega_dt, rotation, dt,
-    sigma=1000.0  # <-- add sigma argument for surface tension strength
+    sigma=1000000.0  # <-- add sigma argument for surface tension strength
 ):
     grid = field.grid
     offset = field.offset
