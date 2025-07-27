@@ -26,6 +26,9 @@ def IBM_force_GENERAL(field, Xi, particle_center, geom_param, Grid_p, shape_fn, 
     surface_coord = [(xp) / dxEUL - offset[0], (yp) / dyEUL - offset[1]]
     velocity_at_surface = surface_fn(field, xp, yp)
 
+    # Penalty force (per direction)
+    force_penalty = (UP - velocity_at_surface) / dt  # shape [N]
+
     # --- Surface Tension Force Calculation ---
     N = xp.shape[0]
     i_next = jnp.roll(jnp.arange(N), -1)
@@ -35,7 +38,10 @@ def IBM_force_GENERAL(field, Xi, particle_center, geom_param, Grid_p, shape_fn, 
     l_i_norm = l_i / jnp.linalg.norm(l_i, axis=1, keepdims=True)
     l_im1_norm = l_im1 / jnp.linalg.norm(l_im1, axis=1, keepdims=True)
     force_sigma = -sigma * (l_i_norm - l_im1_norm)  # [N, 2]
-    force = force_sigma[:, Xi]  # Select x or y component: [N]
+    force_surface = force_sigma[:, Xi]  # [N], select the component
+
+    # **Sum both forces**
+    force = force_penalty + force_surface  # [N]
 
     # Arc lengths for spreading
     x_i = jnp.roll(xp, -1)
