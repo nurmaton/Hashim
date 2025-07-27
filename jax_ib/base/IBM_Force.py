@@ -53,8 +53,9 @@ def IBM_force_GENERAL(
     # --- Total force ---
     force = force_penalty + force_tension
 
-    # Print only every 10 steps (when current_t is 0, 10, 20, 30, ...)
-    if (current_t % 10) < 1e-6:  # Handles floating point time
+    import jax
+
+    def debug_print_forces(_):
         jax.debug.print(
             "Step {t}: Penalty mean={pmean:.3g} max={pmax:.3g}; Tension mean={tmean:.3g} max={tmax:.3g}; Total mean={fmean:.3g} max={fmax:.3g}",
             t=current_t,
@@ -65,6 +66,15 @@ def IBM_force_GENERAL(
             fmean=jnp.mean(force),
             fmax=jnp.max(jnp.abs(force))
         )
+    
+    # This works even if current_t is a JAX tracer.
+    jax.lax.cond(
+        jnp.abs(jnp.remainder(current_t, 10.0)) < 1e-6,
+        debug_print_forces,
+        lambda _: None,
+        operand=None
+    )
+
 
     x_i = jnp.roll(xp, -1)
     y_i = jnp.roll(yp, -1)
