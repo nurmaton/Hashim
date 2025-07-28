@@ -115,7 +115,7 @@ def IBM_Multiple_NEW(field, Xi, particles, discrete_fn, surface_fn, dt, sigma=1.
         dx_dt = jax.jacrev(Xc)
         domega_dt = jax.jacrev(rotation)
         force += IBM_force_GENERAL(
-            field, Xi, particles, dx_dt, domega_dt, rotation, dt, sigma
+            field, Xi, particles.particles[i], dx_dt, domega_dt, rotation, dt, sigma
         )
     return grids.GridArray(force, field.offset, field.grid)
 
