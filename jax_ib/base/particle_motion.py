@@ -7,7 +7,7 @@ import jax.numpy as jnp
 def update_massive_deformable_particle(all_variables, dt, gravity_g=0.0):
     """
     Updates the state of a massive, deformable particle for one time step.
-    This version is now fully consistent with the updated particle class.
+    This version is now fully consistent and JAX-compatible.
     """
     particles_container = all_variables.particles
     velocity_field = all_variables.velocity
@@ -40,8 +40,7 @@ def update_massive_deformable_particle(all_variables, dt, gravity_g=0.0):
     
     new_center = jnp.array([[jnp.mean(new_Ym_x), jnp.mean(new_Ym_y)]])
 
-    # --- 3. Create the new particle object with the updated state ---
-    # --- MODIFIED: Removed obsolete arguments from the constructor call ---
+    # --- 3. Create the new particle object ---
     updated_particle = pc.particle(
         xp=new_xp, yp=new_yp, Ym_x=new_Ym_x, Ym_y=new_Ym_y,
         Vm_x=new_Vm_x, Vm_y=new_Vm_y,
@@ -50,7 +49,16 @@ def update_massive_deformable_particle(all_variables, dt, gravity_g=0.0):
         Grid=particle.Grid, shape=particle.shape
     )
     
-    # --- 4. Rebuild the container directly ---
+    # --- 4. Rebuild the container ---
     new_particles_container = pc.particle_lista(particles=[updated_particle])
     
-    return all_variables.tree_replace(particles=new_particles_container, Step_count=all_variables.Step_count + 1)
+    # --- 5. Return a new All_Variables instance with the updated fields ---
+    # --- MODIFIED: Replaced .tree_replace() with the standard constructor ---
+    return pc.All_Variables(
+        particles=new_particles_container,
+        velocity=all_variables.velocity, # velocity is updated by the main solver
+        pressure=all_variables.pressure, # pressure is updated by the main solver
+        Drag=all_variables.Drag,
+        Step_count=all_variables.Step_count + 1,
+        MD_var=all_variables.MD_var
+    )
