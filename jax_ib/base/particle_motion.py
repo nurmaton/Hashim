@@ -53,7 +53,6 @@ def Update_particle_position_Multiple(all_variables, dt):
     return pc.All_Variables(New_particles, velocity, pressure, Drag, Step_count, MD_var)
 
 # === NEW FREE PARTICLE UPDATE FUNCTION WITH INTERPOLATION ===
-
 def interpolate_velocity_nearest(velocity, xp, yp, grid):
     """
     Nearest neighbor interpolation of velocity field at given marker positions.
@@ -62,14 +61,17 @@ def interpolate_velocity_nearest(velocity, xp, yp, grid):
     grid: grid object with .step and .domain
     Returns: vx_marker, vy_marker (arrays, same length as xp/yp)
     """
-    dx, dy = grid.step
-    x0, y0 = grid.domain[0][0], grid.domain[1][0]
+    dx = grid.step[0]
+    dy = grid.step[1]
+    x0 = grid.domain[0][0]
+    y0 = grid.domain[1][0]
     # Convert positions to grid indices
     ix = jnp.clip(jnp.round((xp - x0) / dx).astype(int), 0, velocity[0].data.shape[0] - 1)
     iy = jnp.clip(jnp.round((yp - y0) / dy).astype(int), 0, velocity[1].data.shape[1] - 1)
     vx_marker = velocity[0].data[ix, iy]
     vy_marker = velocity[1].data[ix, iy]
     return vx_marker, vy_marker
+
 
 def Update_particle_position_Free(all_variables, dt):
     """
