@@ -1,5 +1,3 @@
---- START OF FILE IBM_Force.py ---
-
 import jax.numpy as jnp
 import jax
 from jax_ib.base import grids
@@ -51,8 +49,6 @@ def integrate_trapz(integrand,dx,dy):
 
 
 def Integrate_Field_Fluid_Domain(field):
-    
-    
     grid = field.grid
    # offset = field.offset
     dxEUL = grid.step[0]
