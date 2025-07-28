@@ -12,28 +12,32 @@ def Integrate_Field_Fluid_Domain(field):
     return integrate_trapz(field.data, dxEUL, dyEUL)
 
 def IBM_force_GENERAL(
-    field, Xi, particle_center, geom_param, Grid_p,
-    shape_fn, discrete_fn, surface_fn, dx_dt, domega_dt, rotation, dt,
-    sigma=1000000000.0  # <-- add sigma argument for surface tension strength
+    field, Xi, particle, dx_dt, domega_dt, rotation, dt, sigma=1e9
 ):
+    """
+    Compute IBM force (e.g., for surface tension) using current marker positions.
+    """
     grid = field.grid
     offset = field.offset
     X, Y = grid.mesh(offset)
     dxEUL = grid.step[0]
     dyEUL = grid.step[1]
     current_t = field.bc.time_stamp
-    xp0, yp0 = shape_fn(geom_param, Grid_p)
-    xp = (xp0)*jnp.cos(rotation(current_t)) - (yp0)*jnp.sin(rotation(current_t)) + particle_center[0]
-    yp = (xp0)*jnp.sin(rotation(current_t)) + (yp0)*jnp.cos(rotation(current_t)) + particle_center[1]
-    
-    surface_coord = [(xp)/dxEUL - offset[0], (yp)/dyEUL - offset[1]]
-    velocity_at_surface = surface_fn(field, xp, yp)
 
-    # Penalty force (as before)
+    # --- Get marker positions from particle object
+    marker_xy = particle.marker_positions(current_t)  # shape (Nmarkers, 2)
+    xp = marker_xy[:, 0]
+    yp = marker_xy[:, 1]
+
+    # velocity at marker
+    surface_coord = [(xp)/dxEUL - offset[0], (yp)/dyEUL - offset[1]]
+    velocity_at_surface = field.data[tuple(map(lambda arr: arr.astype(int), surface_coord))]  # Or use surface_fn if needed
+
+    # Penalty force (if using rigid motion, typically off for tension-only)
     if Xi == 0:
-        position_r = -(yp - particle_center[1])
+        position_r = -(yp - particle.particle_center[0][1])
     elif Xi == 1:
-        position_r = (xp - particle_center[0])
+        position_r = (xp - particle.particle_center[0][0])
 
     U0 = dx_dt(current_t)
     Omega = domega_dt(current_t)
@@ -46,18 +50,13 @@ def IBM_force_GENERAL(
     i_prev = jnp.roll(jnp.arange(N), 1)
     l_i = jnp.stack([xp[i_next] - xp, yp[i_next] - yp], axis=1)
     l_im1 = jnp.stack([xp - xp[i_prev], yp - yp[i_prev]], axis=1)
-    # l_i_norm = l_i / jnp.linalg.norm(l_i, axis=1, keepdims=True)
-    # l_im1_norm = l_im1 / jnp.linalg.norm(l_im1, axis=1, keepdims=True)
     l_i_norm = l_i / (jnp.linalg.norm(l_i, axis=1, keepdims=True) + 1e-12)
     l_im1_norm = l_im1 / (jnp.linalg.norm(l_im1, axis=1, keepdims=True) + 1e-12)
-    force_sigma = -sigma * (l_i_norm - l_im1_norm)  # shape [N, 2]
-    force_tension = force_sigma[:, Xi]  # shape [N], select x or y component
+    force_sigma = -sigma * (l_i_norm - l_im1_norm)
+    force_tension = force_sigma[:, Xi]
 
     # --- Total force ---
-    # force = force_penalty + force_tension
-    force = force_tension
-
-    import jax
+    force = force_tension  # Use tension only
 
     def debug_print_forces(_):
         jax.debug.print(
@@ -70,15 +69,12 @@ def IBM_force_GENERAL(
             fmean=jnp.mean(force),
             fmax=jnp.max(jnp.abs(force))
         )
-    
-    # This works even if current_t is a JAX tracer.
     jax.lax.cond(
         jnp.abs(jnp.remainder(current_t, 10.0)) < 1e-6,
         debug_print_forces,
         lambda _: None,
         operand=None
     )
-
 
     x_i = jnp.roll(xp, -1)
     y_i = jnp.roll(yp, -1)
@@ -87,7 +83,7 @@ def IBM_force_GENERAL(
     dS = jnp.sqrt(dxL ** 2 + dyL ** 2)
 
     def calc_force(F, xp, yp, dxi, dyi, dss):
-        return F * discrete_fn(jnp.sqrt((xp - X) ** 2 + (yp - Y) ** 2), 0, dxEUL) * dss
+        return F * jnp.exp(-((xp - X)**2 + (yp - Y)**2) / (2*dxEUL**2)) * dss  # Use your discrete_fn here if needed
 
     def foo(tree_arg):
         F, xp, yp, dxi, dyi, dss = tree_arg
@@ -111,24 +107,15 @@ def IBM_force_GENERAL(
     return jnp.sum(jax.pmap(foo_pmap)(jnp.array(mapped)), axis=0)
 
 def IBM_Multiple_NEW(field, Xi, particles, discrete_fn, surface_fn, dt, sigma=1.0):
-    Grid_p = particles.generate_grid()
-    shape_fn = particles.shape
-    Displacement_EQ = particles.Displacement_EQ
-    Rotation_EQ = particles.Rotation_EQ
     Nparticles = len(particles.particle_center)
-    particle_center = particles.particle_center
-    geom_param = particles.geometry_param
-    displacement_param = particles.displacement_param
-    rotation_param = particles.rotation_param
     force = jnp.zeros_like(field.data)
     for i in range(Nparticles):
-        Xc = lambda t: Displacement_EQ([displacement_param[i]], t)
-        rotation = lambda t: Rotation_EQ([rotation_param[i]], t)
+        Xc = lambda t: particles.Displacement_EQ([particles.displacement_param[i]], t)
+        rotation = lambda t: particles.Rotation_EQ([particles.rotation_param[i]], t)
         dx_dt = jax.jacrev(Xc)
         domega_dt = jax.jacrev(rotation)
         force += IBM_force_GENERAL(
-            field, Xi, particle_center[i], geom_param[i], Grid_p,
-            shape_fn, discrete_fn, surface_fn, dx_dt, domega_dt, rotation, dt, sigma
+            field, Xi, particles, dx_dt, domega_dt, rotation, dt, sigma
         )
     return grids.GridArray(force, field.offset, field.grid)
 
