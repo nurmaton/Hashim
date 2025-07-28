@@ -53,10 +53,9 @@ def Update_particle_position_Multiple(all_variables, dt):
     New_particles = pc.particle(Newparticle_center, param_geometry, displacement_param, rotation_param, mygrids, shape_fn, Displacement_EQ, particles.Rotation_EQ)
     return pc.All_Variables(New_particles, velocity, pressure, Drag, Step_count, MD_var)
 
-# === UPDATED FREE PARTICLE UPDATE FUNCTION WITH BILINEAR INTERPOLATION ===
 def Update_particle_position_Free(all_variables, dt):
     """
-    Updates particle positions using bilinearly interpolated local IBM/fluid velocity.
+    Updates marker positions using bilinearly interpolated IBM/fluid velocity.
     Each marker moves according to its local velocity.
     """
     particles = all_variables.particles
@@ -66,23 +65,28 @@ def Update_particle_position_Free(all_variables, dt):
     Step_count = all_variables.Step_count + 1
     MD_var = all_variables.MD_var
 
-    particle_centers = particles.particle_center  # shape [N,2]
-    xp = particle_centers[:, 0]
-    yp = particle_centers[:, 1]
-
-    # Interpolate local velocity for each marker using your built-in function (order=1: bilinear)
+    # Get current marker positions (now: particles.marker_positions, shape [N,2])
+    xp = particles.marker_positions[:, 0]
+    yp = particles.marker_positions[:, 1]
+    
+    # Interpolate local velocity for each marker (order=1: bilinear)
     vx_marker = jax.vmap(lambda x, y: interpolation.point_interpolation(jnp.array([x, y]), velocity[0].array, order=1))(xp, yp)
     vy_marker = jax.vmap(lambda x, y: interpolation.point_interpolation(jnp.array([x, y]), velocity[1].array, order=1))(xp, yp)
 
     new_xp = xp + dt * vx_marker
     new_yp = yp + dt * vy_marker
-    Newparticle_center = jnp.stack([new_xp, new_yp], axis=1)
+    new_marker_positions = jnp.stack([new_xp, new_yp], axis=1)  # [N,2]
 
-    mygrids = particles.Grid
-    param_geometry = particles.geometry_param
-    shape_fn = particles.shape
-    rotation_param = particles.rotation_param
+    # Construct a new particle object with unchanged properties
+    New_particles = pc.particle(
+        particles.particle_center, 
+        particles.geometry_param, 
+        particles.displacement_param, 
+        particles.rotation_param,
+        particles.Grid, particles.shape,
+        particles.Displacement_EQ, particles.Rotation_EQ
+    )
+    # Attach the updated marker positions
+    New_particles.marker_positions = new_marker_positions
 
-    New_particles = pc.particle(Newparticle_center, param_geometry, particles.displacement_param, rotation_param,
-                                mygrids, shape_fn, particles.Displacement_EQ, particles.Rotation_EQ)
     return pc.All_Variables(New_particles, velocity, pressure, Drag, Step_count, MD_var)
