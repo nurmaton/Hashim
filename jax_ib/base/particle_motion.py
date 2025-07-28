@@ -1,4 +1,5 @@
 from jax_ib.base import particle_class as pc
+from jax_ib.base import interpolation  # <-- Already imported
 import jax
 import jax.numpy as jnp
 
@@ -52,46 +53,27 @@ def Update_particle_position_Multiple(all_variables, dt):
     New_particles = pc.particle(Newparticle_center, param_geometry, displacement_param, rotation_param, mygrids, shape_fn, Displacement_EQ, particles.Rotation_EQ)
     return pc.All_Variables(New_particles, velocity, pressure, Drag, Step_count, MD_var)
 
-# === NEW FREE PARTICLE UPDATE FUNCTION WITH INTERPOLATION ===
-def interpolate_velocity_nearest(velocity, xp, yp, grid):
-    """
-    Nearest neighbor interpolation of velocity field at given marker positions.
-    velocity: tuple of (vx, vy) as GridVariables
-    xp, yp: marker positions
-    grid: grid object with .step and .domain
-    Returns: vx_marker, vy_marker (arrays, same length as xp/yp)
-    """
-    dx = grid.step[0]
-    dy = grid.step[1]
-    x0 = grid.domain[0][0]
-    y0 = grid.domain[1][0]
-    # Convert positions to grid indices
-    ix = jnp.clip(jnp.round((xp - x0) / dx).astype(int), 0, velocity[0].data.shape[0] - 1)
-    iy = jnp.clip(jnp.round((yp - y0) / dy).astype(int), 0, velocity[1].data.shape[1] - 1)
-    vx_marker = velocity[0].data[ix, iy]
-    vy_marker = velocity[1].data[ix, iy]
-    return vx_marker, vy_marker
-
-
+# === UPDATED FREE PARTICLE UPDATE FUNCTION WITH BILINEAR INTERPOLATION ===
 def Update_particle_position_Free(all_variables, dt):
     """
-    Updates particle positions using the velocity of the fluid/IBM (not a prescribed equation).
-    Each marker moves according to its interpolated local velocity.
+    Updates particle positions using bilinearly interpolated local IBM/fluid velocity.
+    Each marker moves according to its local velocity.
     """
     particles = all_variables.particles
     Drag = all_variables.Drag
-    velocity = all_variables.velocity
+    velocity = all_variables.velocity  # tuple of GridVariable
     pressure = all_variables.pressure
     Step_count = all_variables.Step_count + 1
     MD_var = all_variables.MD_var
 
-    particle_centers = particles.particle_center
-
-    # Interpolate local velocity for each marker
+    particle_centers = particles.particle_center  # shape [N,2]
     xp = particle_centers[:, 0]
     yp = particle_centers[:, 1]
-    # vx_marker, vy_marker = interpolate_velocity_nearest(velocity, xp, yp, particles.Grid)
-    vx_marker, vy_marker = interpolate_velocity_nearest(velocity, xp, yp, grid)
+
+    # Interpolate local velocity for each marker using your built-in function (order=1: bilinear)
+    vx_marker = jax.vmap(lambda x, y: interpolation.point_interpolation(jnp.array([x, y]), velocity[0].array, order=1))(xp, yp)
+    vy_marker = jax.vmap(lambda x, y: interpolation.point_interpolation(jnp.array([x, y]), velocity[1].array, order=1))(xp, yp)
+
     new_xp = xp + dt * vx_marker
     new_yp = yp + dt * vy_marker
     Newparticle_center = jnp.stack([new_xp, new_yp], axis=1)
