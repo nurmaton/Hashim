@@ -87,6 +87,8 @@ def Update_particle_position_Free(all_variables, dt):
     rotation_param = particles.rotation_param
 
     # Set Displacement_EQ and Rotation_EQ to None to disable scripted motion
+    # New_particles = pc.particle(Newparticle_center, param_geometry, particles.displacement_param, rotation_param,
+    #                             mygrids, shape_fn, None, None)
     New_particles = pc.particle(Newparticle_center, param_geometry, particles.displacement_param, rotation_param,
-                                mygrids, shape_fn, None, None)
+                                mygrids, shape_fn, particles.Displacement_EQ, particles.Rotation_EQ)
     return pc.All_Variables(New_particles, velocity, pressure, Drag, Step_count, MD_var)
