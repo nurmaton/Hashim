@@ -14,7 +14,7 @@ def Integrate_Field_Fluid_Domain(field):
 def IBM_force_GENERAL(
     field, Xi, particle_center, geom_param, Grid_p,
     shape_fn, discrete_fn, surface_fn, dx_dt, domega_dt, rotation, dt,
-    sigma=1000000.0  # <-- add sigma argument for surface tension strength
+    sigma=1000000000.0  # <-- add sigma argument for surface tension strength
 ):
     grid = field.grid
     offset = field.offset
@@ -53,8 +53,8 @@ def IBM_force_GENERAL(
     force_tension = force_sigma[:, Xi]  # shape [N], select x or y component
 
     # --- Total force ---
-    force = force_penalty + force_tension
-    # force = force_tension
+    # force = force_penalty + force_tension
+    force = force_tension
 
     import jax
 
