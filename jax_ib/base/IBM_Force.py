@@ -1,20 +1,12 @@
 import jax.numpy as jnp
 import jax
 from jax_ib.base import grids
+from jax import debug as jax_debug # <-- IMPORT JAX DEBUG
 
 # --- This function remains the same ---
 def calculate_tension_force(xp, yp, sigma):
     """
     Calculates the surface tension force on each Lagrangian marker.
-
-    Args:
-        xp (jax.numpy.ndarray): Array of x-coordinates of the markers.
-        yp (jax.numpy.ndarray): Array of y-coordinates of the markers.
-        sigma (float): The surface tension coefficient.
-
-    Returns:
-        tuple[jax.numpy.ndarray, jax.numpy.ndarray]: A tuple containing the
-        x and y components of the tension force at each marker.
     """
     dxL = jnp.roll(xp, -1) - xp
     dyL = jnp.roll(yp, -1) - yp
@@ -33,16 +25,13 @@ def integrate_trapz(integrand,dx,dy):
 
 
 def Integrate_Field_Fluid_Domain(field):
-    
-    
     grid = field.grid
     dxEUL = grid.step[0]
     dyEUL = grid.step[1]
-    
     return integrate_trapz(field.data,dxEUL,dyEUL)
 
 # --- MODIFIED FUNCTION ---
-# This function now combines the direct forcing term with the tension force.
+# Now isolates the tension force and adds printing.
 def IBM_force_GENERAL(field,Xi,particle_center,geom_param,Grid_p,shape_fn,discrete_fn,surface_fn,dx_dt,domega_dt,rotation,dt, sigma=0.0):
     
     grid = field.grid
@@ -56,8 +45,7 @@ def IBM_force_GENERAL(field,Xi,particle_center,geom_param,Grid_p,shape_fn,discre
 
     xp = (xp0)*jnp.cos(rotation(current_t))-(yp0)*jnp.sin(rotation(current_t))+particle_center[0]
     yp = (xp0)*jnp.sin(rotation(current_t))+(yp0 )*jnp.cos(rotation(current_t))+particle_center[1]
-    surface_coord =[(xp)/dxEUL-offset[0],(yp)/dyEUL-offset[1]]
-
+    
     velocity_at_surface = surface_fn(field,xp,yp)
     
     if Xi==0:
@@ -69,32 +57,46 @@ def IBM_force_GENERAL(field,Xi,particle_center,geom_param,Grid_p,shape_fn,discre
     Omega=domega_dt(current_t)    
     UP= U0[Xi] + Omega*position_r 
     
-    # Direct forcing term (a force density)
+    # 1. Direct forcing term (a force density)
     direct_force_density = (UP - velocity_at_surface)/dt
     
-    # Calculate segment lengths dS for converting tension force to density
+    # Calculate segment lengths dS for density conversion
     x_i = jnp.roll(xp,-1)
     y_i = jnp.roll(yp,-1)
     dxL = x_i-xp
     dyL = y_i-yp
-    dS = jnp.sqrt(dxL**2 + dyL**2)
+    dS = jnp.sqrt(dxL**2 + dyL**2) + 1e-9
 
-    # --- NEW: Combine direct forcing with tension force ---
-    total_force_density = direct_force_density
+    # --- MODIFICATION: Isolate Tension Force and Print ---
+    total_force_density = jnp.zeros_like(direct_force_density) # Initialize as zero
     if sigma is not None and sigma > 0.0:
-        # Calculate the physical tension force (a point force) on the particle
+        # 2. Calculate the physical tension force (a point force) on the particle
         tension_force_x, tension_force_y = calculate_tension_force(xp, yp, sigma)
 
-        # Convert the point tension force to a force density by dividing by dS.
-        # Subtract it because the force on the fluid is the reaction force (-F_tension).
+        # To see the effect of ONLY the tension force:
+        # The force on the fluid is the reaction force (-F_tension). Convert to density by dividing by dS.
         if Xi == 0:
-            total_force_density = direct_force_density - (tension_force_x / dS)
+            total_force_density = - (tension_force_x / dS)
         else: # Xi == 1
-            total_force_density = direct_force_density - (tension_force_y / dS)
-    # --- END NEW SECTION ---
+            total_force_density = - (tension_force_y / dS)
+        
+        # To see the COMBINED effect (direct forcing + tension), you would use this line instead:
+        # if Xi == 0:
+        #     total_force_density = direct_force_density - (tension_force_x / dS)
+        # else:
+        #     total_force_density = direct_force_density - (tension_force_y / dS)
+
+        # --- DEBUG PRINTING ---
+        # This will only print for the x-component (Xi==0) to avoid duplicate messages.
+        if Xi == 0:
+            jax_debug.print("--- Force Analysis (t={t}) ---", t=current_t)
+            jax_debug.print("Max Abs Direct Force Density: {x}", x=jnp.max(jnp.abs(direct_force_density)))
+            jax_debug.print("Max Abs Tension Force (Point Force): {x}", x=jnp.max(jnp.abs(tension_force_x)))
+            jax_debug.print("Max Abs Total Force Density (Tension Only): {x}", x=jnp.max(jnp.abs(total_force_density)))
+            jax_debug.print("------------------------------------")
+    # --- END MODIFICATION ---
 
     def calc_force(F,xp,yp,dxi,dyi,dss):
-        # Spread the TOTAL force density onto the Eulerian grid
         return F*discrete_fn(jnp.sqrt((xp-X)**2 + (yp-Y)**2),0,dxEUL)*dss
 
     def foo(tree_arg):
@@ -108,11 +110,10 @@ def IBM_force_GENERAL(field,Xi,particle_center,geom_param,Grid_p,shape_fn,discre
     n = len(xp)//divider
     mapped = []
     for i in range(divider):
-       # Pass the combined total_force_density to be spread
        mapped.append([total_force_density[i*n:(i+1)*n],xp[i*n:(i+1)*n],yp[i*n:(i+1)*n],dxL[i*n:(i+1)*n],dyL[i*n:(i+1)*n],dS[i*n:(i+1)*n]])
 
     return jnp.sum(jax.pmap(foo_pmap)(jnp.array(mapped)),axis=0)
-# --- END MODIFIED FUNCTION ---
+
 
 def IBM_Multiple_NEW(field, Xi, particles,discrete_fn,surface_fn,dt, sigma=0.0):
     Grid_p = particles.generate_grid()
