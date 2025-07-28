@@ -74,8 +74,10 @@ def Update_particle_position_Free(all_variables, dt):
     # For a real setup, use your existing interpolation function.
 
     # Dummy code (replace with interpolation!):
-    v_x = float(velocity[0].data[0, 0])
-    v_y = float(velocity[1].data[0, 0])
+    # v_x = float(velocity[0].data[0, 0])
+    # v_y = float(velocity[1].data[0, 0])
+    v_x = velocity[0].data[0, 0]
+    v_y = velocity[1].data[0, 0]
     # Update all centers (broadcast for all particles)
     Newparticle_center = particle_centers + dt * jnp.array([v_x, v_y])
 
