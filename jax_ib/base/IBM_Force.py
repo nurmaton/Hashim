@@ -107,15 +107,15 @@ def IBM_force_GENERAL(
     return jnp.sum(jax.pmap(foo_pmap)(jnp.array(mapped)), axis=0)
 
 def IBM_Multiple_NEW(field, Xi, particles, discrete_fn, surface_fn, dt, sigma=1.0):
-    Nparticles = len(particles.particle_center)
+    Nparticles = len(particles)
     force = jnp.zeros_like(field.data)
     for i in range(Nparticles):
-        Xc = lambda t: particles.Displacement_EQ([particles.displacement_param[i]], t)
-        rotation = lambda t: particles.Rotation_EQ([particles.rotation_param[i]], t)
+        Xc = lambda t: particles[i].Displacement_EQ([particles[i].displacement_param], t)
+        rotation = lambda t: particles[i].Rotation_EQ([particles[i].rotation_param], t)
         dx_dt = jax.jacrev(Xc)
         domega_dt = jax.jacrev(rotation)
         force += IBM_force_GENERAL(
-            field, Xi, particles.particles[i], dx_dt, domega_dt, rotation, dt, sigma
+            field, Xi, particles[i], dx_dt, domega_dt, rotation, dt, sigma
         )
     return grids.GridArray(force, field.offset, field.grid)
 
