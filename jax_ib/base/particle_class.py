@@ -79,6 +79,19 @@ class particle:
     def calc_Rtheta(self):
         return self.shape(self.geometry_param, self.Grid)
 
+    # === NEW: Marker positions at current time ===
+    def marker_positions(self, current_t):
+        """
+        Returns marker positions (Nmarkers, 2) for current particle at given time.
+        """
+        # Calculate boundary coordinates in (xp0, yp0)
+        xp0, yp0 = self.shape(self.geometry_param, self.Grid)
+        theta = self.Rotation_EQ(self.rotation_param, current_t)
+        xc, yc = self.particle_center[0]
+        xp = xp0 * jnp.cos(theta) - yp0 * jnp.sin(theta) + xc
+        yp = xp0 * jnp.sin(theta) + yp0 * jnp.cos(theta) + yc
+        return jnp.stack([xp, yp], axis=1)  # shape (Nmarkers, 2)
+
 @register_pytree_node_class
 @dataclasses.dataclass
 class All_Variables:
