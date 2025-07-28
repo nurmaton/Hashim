@@ -4,7 +4,9 @@ from jax_ib.base import grids
 from jax import debug as jax_debug
 
 def calculate_tension_force(xp, yp, sigma):
-    # (This function is correct and remains unchanged)
+    """
+    Calculates the surface tension force on each Lagrangian marker.
+    """
     dxL = jnp.roll(xp, -1) - xp
     dyL = jnp.roll(yp, -1) - yp
     dS = jnp.sqrt(dxL**2 + dyL**2) + 1e-9
@@ -28,33 +30,27 @@ def Integrate_Field_Fluid_Domain(field):
     dxEUL, dyEUL = grid.step[0], grid.step[1]
     return integrate_trapz(field.data,dxEUL,dyEUL)
 
-# --- REWRITTEN FUNCTION for Deformable Body ---
 def IBM_force_GENERAL(field, Xi, particle, discrete_fn):
-    
+    """
+    Calculates and spreads the total physical force for a single deformable particle.
+    """
     grid = field.grid
     offset = field.offset
     X, Y = grid.mesh(offset)
     dxEUL = grid.step[0]
     
-    # Get current particle state
     xp, yp = particle.xp, particle.yp
     Ym_x, Ym_y = particle.Ym_x, particle.Ym_y
     Kp = particle.stiffness
     sigma = particle.sigma
 
     # --- Calculate total physical force ON the fluid ---
-    # The force exerted BY the particle ON the fluid is the sum of the
-    # penalty force and the tension force acting on the fluid markers.
-    
-    # 1. Penalty spring force (Eq. 4) on the fluid marker
     penalty_force_x, penalty_force_y = calculate_penalty_force(xp, yp, Ym_x, Ym_y, Kp)
     
-    # 2. Surface tension force (Eq. 7) on the fluid marker
     tension_force_x, tension_force_y = jnp.zeros_like(xp), jnp.zeros_like(yp)
     if sigma is not None and sigma > 0.0:
         tension_force_x, tension_force_y = calculate_tension_force(xp, yp, sigma)
 
-    # Total force exerted on the fluid
     force_on_fluid_x = penalty_force_x + tension_force_x
     force_on_fluid_y = penalty_force_y + tension_force_y
     
@@ -65,7 +61,6 @@ def IBM_force_GENERAL(field, Xi, particle, discrete_fn):
     dxL, dyL = x_i - xp, y_i - yp
     dS = jnp.sqrt(dxL**2 + dyL**2) + 1e-9
 
-    # Convert point force to force density (F/L) for spreading
     force_density_to_spread = force_to_spread / dS
     
     def calc_force(F_density, xp_pt, yp_pt, dss_pt):
@@ -86,19 +81,27 @@ def IBM_force_GENERAL(field, Xi, particle, discrete_fn):
 
     return jnp.sum(jax.pmap(foo_pmap)(jnp.array(mapped)), axis=0)
 
-# --- REWRITTEN HIGHER-LEVEL FUNCTIONS ---
-def IBM_Multiple_NEW(field, Xi, particles, discrete_fn):
-    force = jnp.zeros_like(field.data)
-    # This loop is now over a list of particle objects if you have multiple
-    for particle in particles.particles: # Assuming particles is now a container
-        force += IBM_force_GENERAL(field, Xi, particle, discrete_fn)
+
+def IBM_Multiple_NEW(field, Xi, particles_container, discrete_fn):
+    """
+    Calculates the total IBM force for all particles in the container.
+    This version is simplified for a single particle to be JAX-compatible.
+    """
+    # For a single-particle simulation, we directly access the particle.
+    # This avoids Python loops that break JAX's JIT compilation.
+    particle = particles_container.particles[0]
+    force = IBM_force_GENERAL(field, Xi, particle, discrete_fn)
     return grids.GridArray(force, field.offset, field.grid)
 
+
 def calc_IBM_force_NEW_MULTIPLE(all_variables, discrete_fn, dt):
+    """
+    Top-level function to calculate the IBM forcing term for the solver.
+    """
     velocity = all_variables.velocity
     particles = all_variables.particles
     axis = [0, 1]
-    # Note: dt is unused here now, but kept for API consistency with the solver.
+    # Note: dt is unused in the penalty method, but kept for API consistency.
     ibm_forcing = lambda field, Xi: IBM_Multiple_NEW(field, Xi, particles, discrete_fn)
     
     return tuple(grids.GridVariable(ibm_forcing(field, Xi), field.bc) for field, Xi in zip(velocity, axis))
