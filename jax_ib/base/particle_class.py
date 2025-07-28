@@ -40,27 +40,26 @@ class Grid1d:
 @register_pytree_node_class
 @dataclasses.dataclass
 class particle:
-    # --- NEW DYNAMIC STATE VARIABLES ---
-    xp: jax.numpy.ndarray          # Current fluid marker x-positions (Xm_i in paper)
-    yp: jax.numpy.ndarray          # Current fluid marker y-positions (Xm_i in paper)
-    Ym_x: jax.numpy.ndarray        # Mass marker x-positions (Ym_i in paper)
-    Ym_y: jax.numpy.ndarray        # Mass marker y-positions (Ym_i in paper)
-    Vm_x: jax.numpy.ndarray        # Mass marker x-velocities
-    Vm_y: jax.numpy.ndarray        # Mass marker y-velocities
+    # --- DYNAMIC STATE VARIABLES ---
+    xp: jax.numpy.ndarray
+    yp: jax.numpy.ndarray
+    Ym_x: jax.numpy.ndarray
+    Ym_y: jax.numpy.ndarray
+    Vm_x: jax.numpy.ndarray
+    Vm_y: jax.numpy.ndarray
     
-    # --- NEW PHYSICAL PROPERTIES ---
-    mass_per_marker: float         # Mass M for each marker
-    stiffness: float               # Spring stiffness Kp
-    sigma: float                   # Surface tension coefficient
+    # --- PHYSICAL PROPERTIES ---
+    mass_per_marker: float
+    stiffness: float
+    sigma: float
     
-    # --- Kept for initialization and other potential uses ---
+    # --- Kept for initialization ---
     particle_center: Sequence[Any]
     geometry_param: Sequence[Any]
     Grid: Grid1d
     shape: Callable
     
     def tree_flatten(self):
-      """Returns flattening recipe for JAX pytree."""
       children = (self.xp, self.yp, self.Ym_x, self.Ym_y, self.Vm_x, self.Vm_y,
                   self.mass_per_marker, self.stiffness, self.sigma,
                   self.particle_center, self.geometry_param)
@@ -69,7 +68,6 @@ class particle:
 
     @classmethod
     def tree_unflatten(cls, aux_data, children):
-       """Returns unflattening recipe for JAX pytree."""
        return cls(*children, *aux_data)
 
     def generate_grid(self):
@@ -79,10 +77,32 @@ class particle:
       return self.shape(self.geometry_param,self.Grid)
 
 
+# --- NEW CLASS THAT WAS MISSING ---
+@register_pytree_node_class
+@dataclasses.dataclass
+class particle_lista:
+    particles: Sequence[particle,]
+    
+    def tree_flatten(self):
+      """Returns flattening recipe for JAX pytree."""
+      # The children are the particle objects themselves.
+      children = tuple(self.particles)
+      # No auxiliary data is needed.
+      aux_data = None
+      return children, aux_data
+
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+       """Returns unflattening recipe for JAX pytree."""
+       # The children come back as a tuple, so we convert it back to a list.
+       return cls(particles=list(children))
+# --- END NEW CLASS ---
+
+
 @register_pytree_node_class
 @dataclasses.dataclass
 class All_Variables: 
-    particles: Sequence[particle,]
+    particles: particle_lista  # This should now expect a particle_lista object
     velocity: grids.GridVariableVector
     pressure: grids.GridVariable
     Drag:Sequence[Any]
@@ -94,4 +114,4 @@ class All_Variables:
       return children, aux_data
     @classmethod
     def tree_unflatten(cls, aux_data, children):
-       return cls(*children) 
+       return cls(*children)
