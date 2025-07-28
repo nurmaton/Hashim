@@ -339,7 +339,7 @@ def boundary_function(t):
   freq = 1
   return 1+0*(A*jnp.cos(freq*t)+B*jnp.sin(freq*t))
 
-# --- MODIFIED FUNCTIONS TO FIX THE BUG ---
+# --- MODIFIED FUNCTIONS TO FIX THE BUGS ---
 
 def Reserve_BC(all_variable: particle_class.All_Variables, step_time: float) -> particle_class.All_Variables:
     """
@@ -352,9 +352,6 @@ def update_BC(all_variable: particle_class.All_Variables, step_time: float) -> p
     Pass-through function. The logic for time-dependent BCs is not needed
     for the current simulation setup with static periodic boundaries.
     """
-    # The time_stamp of the velocity field's boundary condition will be updated
-    # implicitly through the PyTree mechanics. We don't need to manually
-    # reconstruct the boundary condition object here.
     return all_variable
 
 # --- END MODIFIED FUNCTIONS ---
@@ -496,19 +493,29 @@ def consistent_boundary_conditions(*arrays: GridVariable) -> Tuple[str, ...]:
       bc_types.append('nonperiodic')
   return tuple(bc_types)
 
-def get_pressure_bc_from_velocity(v: GridVariableVector) -> BoundaryConditions:
+# --- MODIFIED FUNCTION to fix the PyTree bug ---
+
+# Create a single, top-level lambda function. This object will be stable.
+_stable_lambda = lambda x: x
+
+def get_pressure_bc_from_velocity(v: grids.GridVariableVector) -> BoundaryConditions:
+  """Returns pressure boundary conditions for the specified velocity."""
   velocity_bc_types = consistent_boundary_conditions(*v)
   pressure_bc_types = []
   bc_value = ((0.0,0.0),(0.0,0.0))
-  # Using a simple lambda for the boundary function as it's not time-dependent.
-  Bc_f = lambda x: x
+  
+  # Use the stable, top-level lambda function to prevent PyTree mismatch in JAX scans.
+  Bc_f = _stable_lambda
+
   for velocity_bc_type in velocity_bc_types:
     if velocity_bc_type == 'periodic':
       pressure_bc_types.append((BCType.PERIODIC, BCType.PERIODIC))
     else:
       pressure_bc_types.append((BCType.NEUMANN, BCType.NEUMANN))
-  # The time_stamp can be a fixed value as it's not used for periodic BCs.
+  # The time_stamp can be a fixed value as it's not used for these BC types.
   return ConstantBoundaryConditions(values=bc_value,time_stamp=0.0,types=pressure_bc_types,boundary_fn=Bc_f)
+
+# --- END MODIFIED FUNCTION ---
 
 def get_advection_flux_bc_from_velocity_and_scalar(
     u: GridVariable, c: GridVariable,
