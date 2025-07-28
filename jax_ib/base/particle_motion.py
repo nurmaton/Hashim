@@ -52,12 +52,29 @@ def Update_particle_position_Multiple(all_variables, dt):
     New_particles = pc.particle(Newparticle_center, param_geometry, displacement_param, rotation_param, mygrids, shape_fn, Displacement_EQ, particles.Rotation_EQ)
     return pc.All_Variables(New_particles, velocity, pressure, Drag, Step_count, MD_var)
 
-# === NEW FREE PARTICLE UPDATE FUNCTION BELOW ===
+# === NEW FREE PARTICLE UPDATE FUNCTION WITH INTERPOLATION ===
+
+def interpolate_velocity_nearest(velocity, xp, yp, grid):
+    """
+    Nearest neighbor interpolation of velocity field at given marker positions.
+    velocity: tuple of (vx, vy) as GridVariables
+    xp, yp: marker positions
+    grid: grid object with .step and .domain
+    Returns: vx_marker, vy_marker (arrays, same length as xp/yp)
+    """
+    dx, dy = grid.step
+    x0, y0 = grid.domain[0][0], grid.domain[1][0]
+    # Convert positions to grid indices
+    ix = jnp.clip(jnp.round((xp - x0) / dx).astype(int), 0, velocity[0].data.shape[0] - 1)
+    iy = jnp.clip(jnp.round((yp - y0) / dy).astype(int), 0, velocity[1].data.shape[1] - 1)
+    vx_marker = velocity[0].data[ix, iy]
+    vy_marker = velocity[1].data[ix, iy]
+    return vx_marker, vy_marker
 
 def Update_particle_position_Free(all_variables, dt):
     """
     Updates particle positions using the velocity of the fluid/IBM (not a prescribed equation).
-    This allows particles to move and deform under the IBM force, e.g., tension.
+    Each marker moves according to its interpolated local velocity.
     """
     particles = all_variables.particles
     Drag = all_variables.Drag
@@ -66,29 +83,21 @@ def Update_particle_position_Free(all_variables, dt):
     Step_count = all_variables.Step_count + 1
     MD_var = all_variables.MD_var
 
-    # For a flexible interface, particle_centers could be marker positions (not just the center of mass)
     particle_centers = particles.particle_center
 
-    # You need to interpolate the velocity field at the marker positions.
-    # For this demo, we'll just use the velocity at grid index [0,0] for both x and y (replace with your own interpolation)
-    # For a real setup, use your existing interpolation function.
-
-    # Dummy code (replace with interpolation!):
-    # v_x = float(velocity[0].data[0, 0])
-    # v_y = float(velocity[1].data[0, 0])
-    v_x = velocity[0].data[0, 0]
-    v_y = velocity[1].data[0, 0]
-    # Update all centers (broadcast for all particles)
-    Newparticle_center = particle_centers + dt * jnp.array([v_x, v_y])
+    # Interpolate local velocity for each marker
+    xp = particle_centers[:, 0]
+    yp = particle_centers[:, 1]
+    vx_marker, vy_marker = interpolate_velocity_nearest(velocity, xp, yp, particles.Grid)
+    new_xp = xp + dt * vx_marker
+    new_yp = yp + dt * vy_marker
+    Newparticle_center = jnp.stack([new_xp, new_yp], axis=1)
 
     mygrids = particles.Grid
     param_geometry = particles.geometry_param
     shape_fn = particles.shape
     rotation_param = particles.rotation_param
 
-    # Set Displacement_EQ and Rotation_EQ to None to disable scripted motion
-    # New_particles = pc.particle(Newparticle_center, param_geometry, particles.displacement_param, rotation_param,
-    #                             mygrids, shape_fn, None, None)
     New_particles = pc.particle(Newparticle_center, param_geometry, particles.displacement_param, rotation_param,
                                 mygrids, shape_fn, particles.Displacement_EQ, particles.Rotation_EQ)
     return pc.All_Variables(New_particles, velocity, pressure, Drag, Step_count, MD_var)
