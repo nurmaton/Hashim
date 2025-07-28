@@ -90,7 +90,8 @@ def Update_particle_position_Free(all_variables, dt):
     # Interpolate local velocity for each marker
     xp = particle_centers[:, 0]
     yp = particle_centers[:, 1]
-    vx_marker, vy_marker = interpolate_velocity_nearest(velocity, xp, yp, particles.Grid)
+    # vx_marker, vy_marker = interpolate_velocity_nearest(velocity, xp, yp, particles.Grid)
+    vx_marker, vy_marker = interpolate_velocity_nearest(velocity, xp, yp, grid)
     new_xp = xp + dt * vx_marker
     new_yp = yp + dt * vy_marker
     Newparticle_center = jnp.stack([new_xp, new_yp], axis=1)
