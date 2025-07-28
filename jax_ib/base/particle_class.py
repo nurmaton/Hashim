@@ -87,7 +87,7 @@ class particle:
         # Calculate boundary coordinates in (xp0, yp0)
         xp0, yp0 = self.shape(self.geometry_param, self.Grid)
         theta = self.Rotation_EQ(self.rotation_param, current_t)
-        xc, yc = self.particle_center[0]
+        xc, yc = self.particle_center
         xp = xp0 * jnp.cos(theta) - yp0 * jnp.sin(theta) + xc
         yp = xp0 * jnp.sin(theta) + yp0 * jnp.cos(theta) + yc
         return jnp.stack([xp, yp], axis=1)  # shape (Nmarkers, 2)
