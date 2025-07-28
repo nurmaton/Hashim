@@ -22,12 +22,9 @@ def IBM_force_GENERAL(
     dxEUL = grid.step[0]
     dyEUL = grid.step[1]
     current_t = field.bc.time_stamp
-    # xp0, yp0 = shape_fn(geom_param, Grid_p)
-    # xp = (xp0)*jnp.cos(rotation(current_t)) - (yp0)*jnp.sin(rotation(current_t)) + particle_center[0]
-    # yp = (xp0)*jnp.sin(rotation(current_t)) + (yp0)*jnp.cos(rotation(current_t)) + particle_center[1]
-
-    xp = particle.marker_positions[:, 0]
-    yp = particle.marker_positions[:, 1]
+    xp0, yp0 = shape_fn(geom_param, Grid_p)
+    xp = (xp0)*jnp.cos(rotation(current_t)) - (yp0)*jnp.sin(rotation(current_t)) + particle_center[0]
+    yp = (xp0)*jnp.sin(rotation(current_t)) + (yp0)*jnp.cos(rotation(current_t)) + particle_center[1]
     
     surface_coord = [(xp)/dxEUL - offset[0], (yp)/dyEUL - offset[1]]
     velocity_at_surface = surface_fn(field, xp, yp)
