@@ -45,8 +45,10 @@ def IBM_force_GENERAL(
     i_prev = jnp.roll(jnp.arange(N), 1)
     l_i = jnp.stack([xp[i_next] - xp, yp[i_next] - yp], axis=1)
     l_im1 = jnp.stack([xp - xp[i_prev], yp - yp[i_prev]], axis=1)
-    l_i_norm = l_i / jnp.linalg.norm(l_i, axis=1, keepdims=True)
-    l_im1_norm = l_im1 / jnp.linalg.norm(l_im1, axis=1, keepdims=True)
+    # l_i_norm = l_i / jnp.linalg.norm(l_i, axis=1, keepdims=True)
+    # l_im1_norm = l_im1 / jnp.linalg.norm(l_im1, axis=1, keepdims=True)
+    l_i_norm = l_i / (jnp.linalg.norm(l_i, axis=1, keepdims=True) + 1e-12)
+    l_im1_norm = l_im1 / (jnp.linalg.norm(l_im1, axis=1, keepdims=True) + 1e-12)
     force_sigma = -sigma * (l_i_norm - l_im1_norm)  # shape [N, 2]
     force_tension = force_sigma[:, Xi]  # shape [N], select x or y component
 
