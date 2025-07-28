@@ -53,8 +53,8 @@ def IBM_force_GENERAL(
     force_tension = force_sigma[:, Xi]  # shape [N], select x or y component
 
     # --- Total force ---
-    # force = force_penalty + force_tension
-    force = force_tension
+    force = force_penalty + force_tension
+    # force = force_tension
 
     import jax
 
