@@ -103,7 +103,7 @@ def IBM_force_GENERAL(field, Xi, particle, discrete_fn):
     
     # The spreading kernel and mapping logic remains the same.
     def calc_force(F_density, xp_pt, yp_pt, dss_pt):
-        return -F_density * discrete_fn(jnp.sqrt((xp_pt - X)**2 + (yp_pt - Y)**2), 0, dxEUL) * dss_pt
+        return F_density * discrete_fn(jnp.sqrt((xp_pt - X)**2 + (yp_pt - Y)**2), 0, dxEUL) * dss_pt
 
     def foo(tree_arg):
         F_density, xp_pt, yp_pt, dss_pt = tree_arg
