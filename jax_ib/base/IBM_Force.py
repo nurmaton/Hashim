@@ -17,8 +17,8 @@ def calculate_tension_force(xp, yp, sigma):
     l_hat_x_prev, l_hat_y_prev = jnp.roll(l_hat_x, 1), jnp.roll(l_hat_y, 1)
     
     # The force is the difference in the tangent vectors, which measures curvature.
-    force_x = sigma * (l_hat_x - l_hat_x_prev)
-    force_y = sigma * (l_hat_y - l_hat_y_prev)
+    force_x = - sigma * (l_hat_x - l_hat_x_prev)
+    force_y = - sigma * (l_hat_y - l_hat_y_prev)
     return force_x, force_y
 
 # --- NEW HELPER FUNCTION ---
