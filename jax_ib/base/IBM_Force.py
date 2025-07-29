@@ -27,8 +27,8 @@ def calculate_tension_force(xp, yp, sigma):
 # to the mass-carrying markers (Y).
 def calculate_penalty_force(xp, yp, Ym_x, Ym_y, Kp):
     """Calculates the penalty spring force F = Kp(Y - X)."""
-    force_x = - Kp * (Ym_x - xp)
-    force_y = - Kp * (Ym_y - yp)
+    force_x = Kp * (Ym_x - xp)
+    force_y = Kp * (Ym_y - yp)
     return force_x, force_y
 
 # --- UNCHANGED UTILITY FUNCTIONS ---
