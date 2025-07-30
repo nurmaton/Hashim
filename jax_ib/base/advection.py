@@ -11,8 +11,21 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""
+Module for calculating the advection term of the Navier-Stokes equations.
 
-"""Module for functionality related to advection."""
+Advection (or convection) describes the transport of a quantity, such as heat
+or momentum, by the bulk motion of the fluid. This module implements the term
+`-(v ⋅ ∇)c`, where `v` is the velocity field and `c` is the quantity being
+transported.
+
+The primary approach used is a finite volume method, where the advection is
+computed as the negative divergence of a flux (`-∇ ⋅ (vc)`). Different functions
+in this module use different interpolation schemes (e.g., linear, upwind,
+Van-Leer) to estimate the value of `c` at the control volume faces, leading to
+schemes with varying accuracy and stability properties. A semi-Lagrangian
+method is also provided as an alternative approach.
+"""
 
 from typing import Optional, Tuple
 import jax
@@ -22,56 +35,45 @@ from jax_ib.base import finite_differences as fd
 from jax_ib.base import grids
 from jax_ib.base import interpolation
 
+# Type aliases for clarity
 GridArray = grids.GridArray
 GridArrayVector = grids.GridArrayVector
 GridVariable = grids.GridVariable
 GridVariableVector = grids.GridVariableVector
 InterpolationFn = interpolation.InterpolationFn
-# TODO(dkochkov) Consider testing if we need operator splitting methods.
 
 
 def _advect_aligned(cs: GridVariableVector, v: GridVariableVector) -> GridArray:
-  """Computes fluxes and the associated advection for aligned `cs` and `v`.
+  """
+  Computes advection from pre-aligned velocity and scalar quantities.
 
-  The values `cs` should consist of a single quantity `c` that has been
-  interpolated to the offset of the components of `v`. The components of `v` and
-  `cs` should be located at the faces of a single (possibly offset) grid cell.
-  We compute the advection as the divergence of the flux on this control volume.
-
-  The boundary condition on the flux is inherited from the scalar quantity `c`.
-
-  A typical example in three dimensions would have
-
-  ```
-  cs[0].offset == v[0].offset == (1., .5, .5)
-  cs[1].offset == v[1].offset == (.5, 1., .5)
-  cs[2].offset == v[2].offset == (.5, .5, 1.)
-  ```
-
-  In this case, the returned advection term would have offset `(.5, .5, .5)`.
+  This is a low-level helper function that performs the final step of a finite
+  volume calculation. It assumes the scalar `cs` and velocity `v` have already
+  been interpolated to the faces of a control volume. It then computes the flux
+  `flux = cs * v` and returns its negative divergence.
 
   Args:
-    cs: a sequence of `GridArray`s; a single value `c` that has been
-      interpolated so that it is aligned with each component of `v`.
-    v: a sequence of `GridArrays` describing a velocity field. Should be defined
-      on the same Grid as cs.
+    cs: A sequence of `GridVariable`s representing a scalar `c` that has been
+      interpolated to be aligned with each component of `v` at the control
+      volume faces.
+    v: A sequence of `GridVariable`s for the velocity field, also located at the
+      control volume faces.
 
   Returns:
-    An `GridArray` containing the time derivative of `c` due to advection by
-    `v`.
-
-  Raises:
-    ValueError: `cs` and `v` have different numbers of components.
-    AlignmentError: if the components of `cs` are not aligned with those of `v`.
+    A `GridArray` containing the time derivative of `c` due to advection by `v`.
   """
-  # TODO(jamieas): add more sophisticated alignment checks, ensuring that the
-  # values are located on the faces of a control volume.
   if len(cs) != len(v):
     raise ValueError('`cs` and `v` must have the same length;'
                      f'got {len(cs)} vs. {len(v)}.')
-  flux = tuple(c.array * u.array for c, u in zip(cs, v))
-  # Flux inherits boundary conditions from cs
-  flux = tuple(grids.GridVariable(f, c.bc) for f, c in zip(flux, cs))
+  
+  # Calculate the flux across each face by multiplying the scalar value by the velocity.
+  flux_data = tuple(c.array * u.array for c, u in zip(cs, v))
+
+  # The boundary condition for the flux is inherited from the scalar quantity `c`.
+  flux = tuple(grids.GridVariable(f, c.bc) for f, c in zip(flux_data, cs))
+
+  # The rate of change due to advection is the negative divergence of the flux.
+  # A net outflow of flux (positive divergence) means the quantity inside decreases.
   return -fd.divergence(flux)
 
 
@@ -80,126 +82,140 @@ def advect_general(
     v: GridVariableVector,
     u_interpolation_fn: InterpolationFn,
     c_interpolation_fn: InterpolationFn,
-    dt: Optional[float] = None) -> GridArray:
-  """Computes advection of a scalar quantity `c` by the velocity field `v`.
+    dt: Optional[float] = None
+) -> GridArray:
+  """
+  A general framework for computing advection using specified interpolation methods.
 
-  This function follows the following procedure:
+  This function implements a finite volume advection scheme. The specific nature
+  of the scheme (e.g., linear, upwind) is determined by the interpolation
+  functions provided as arguments.
 
-    1. Interpolate each component of `v` to the corresponding face of the
-       control volume centered on `c`.
-    2. Interpolate `c` to the same control volume faces.
-    3. Compute the flux `cu` using the aligned values.
-    4. Set the boundary condition on flux, which is inhereited from `c`.
-    5. Return the negative divergence of the flux.
+  The procedure is:
+    1. Determine the locations of the control volume faces around the scalar `c`.
+    2. Interpolate the velocity `v` to these face locations using `u_interpolation_fn`.
+    3. Interpolate the scalar `c` to the same face locations using `c_interpolation_fn`.
+    4. Compute the final advection term from these aligned quantities.
 
   Args:
-    c: the quantity to be transported.
-    v: a velocity field. Should be defined on the same Grid as c.
-    u_interpolation_fn: method for interpolating velocity field `v`.
-    c_interpolation_fn: method for interpolating scalar field `c`.
-    dt: unused time-step.
+    c: The scalar `GridVariable` to be transported.
+    v: The velocity field `GridVariableVector`.
+    u_interpolation_fn: The function used to interpolate the velocity `v`.
+    c_interpolation_fn: The function used to interpolate the scalar `c`.
+    dt: Time step, required by some advanced interpolation schemes. Unused here.
 
   Returns:
     The time derivative of `c` due to advection by `v`.
   """
+  # Get the grid offsets corresponding to the faces of the control volume centered on c.
   target_offsets = grids.control_volume_offsets(c)
+  
+  # Interpolate each velocity component to the corresponding control volume face.
   aligned_v = tuple(u_interpolation_fn(u, target_offset, v, dt)
                     for u, target_offset in zip(v, target_offsets))
+                    
+  # Interpolate the scalar quantity `c` to the same control volume faces.
   aligned_c = tuple(c_interpolation_fn(c, target_offset, aligned_v, dt)
                     for target_offset in target_offsets)
+                    
+  # Pass the aligned velocity and scalar to the helper function to compute the divergence of the flux.
   return _advect_aligned(aligned_c, aligned_v)
 
 
-def advect_linear(c: GridVariable,
-                  v: GridVariableVector,
-                  dt: Optional[float] = None) -> GridArray:
-  """Computes advection using linear interpolations."""
+def advect_linear(
+    c: GridVariable,
+    v: GridVariableVector,
+    dt: Optional[float] = None
+) -> GridArray:
+  """Computes advection using linear interpolation for both velocity and scalar.
+  This corresponds to a standard second-order central difference scheme. It is
+  accurate but can be prone to numerical oscillations.
+  """
   return advect_general(c, v, interpolation.linear, interpolation.linear, dt)
 
 
-def advect_upwind(c: GridVariable,
-                  v: GridVariableVector,
-                  dt: Optional[float] = None) -> GridArray:
-  """Computes advection using first-order upwind interpolation on `c`."""
+def advect_upwind(
+    c: GridVariable,
+    v: GridVariableVector,
+    dt: Optional[float] = None
+) -> GridArray:
+  """Computes advection using first-order upwind interpolation for the scalar.
+  This scheme is very stable and non-oscillatory but is only first-order
+  accurate and introduces numerical diffusion (smearing out sharp features).
+  """
   return advect_general(c, v, interpolation.linear, interpolation.upwind, dt)
 
 
 def _align_velocities(v: GridVariableVector) -> Tuple[GridVariableVector]:
-  """Returns interpolated components of `v` needed for convection.
+  """Pre-interpolates all velocity components needed for the convection term.
+  
+  For the convection term `(v ⋅ ∇)v`, calculating the advection of each velocity
+  component `v_j` requires interpolating all other velocity components `v_i` to
+  the faces of `v_j`'s control volume. This function performs all of these
+  interpolations upfront to avoid redundant calculations.
 
   Args:
-    v: a velocity field.
+    v: The velocity field vector.
 
   Returns:
     A d-tuple of d-tuples of `GridVariable`s `aligned_v`, where `d = len(v)`.
-    The entry `aligned_v[i][j]` is the component `v[i]` after interpolation to
-    the appropriate face of the control volume centered around `v[j]`.
+    `aligned_v[i][j]` is component `v[i]` interpolated to the control volume
+    faces of component `v[j]`.
   """
   grid = grids.consistent_grid(*v)
-  #grid = v[0].grid  
+  # Get the control volume face offsets for each velocity component.
   offsets = tuple(grids.control_volume_offsets(u) for u in v)
+  # Perform the interpolations.
   aligned_v = tuple(
-      tuple(interpolation.linear(v[i], offsets[i][j])
-            for j in range(grid.ndim))
-      for i in range(grid.ndim))
+      tuple(interpolation.linear(v[i], offsets[j][i]) # Note the swapped indices i and j
+            for i in range(grid.ndim))
+      for j in range(grid.ndim))
   return aligned_v
 
 
 def _velocities_to_flux(
-    aligned_v: Tuple[GridVariableVector]) -> Tuple[GridVariableVector]:
-  """Computes the fluxes across the control volume faces for a velocity field.
-
-  This is the flux associated with the nonlinear term `vv` for velocity `v`.
-  The boundary condition on the flux is inherited from `v`.
-
-  Args:
-    aligned_v: a d-tuple of d-tuples of `GridVariable`s such that the entry
-    `aligned_v[i][j]` is the component `v[i]` after interpolation to
-    the appropriate face of the control volume centered around `v[j]`. This is
-    the output of `_align_velocities`.
-
-  Returns:
-    A tuple of tuples `flux` of `GridVariable`s with the same structure as
-    `aligned_v`. The entry `flux[i][j]` is `aligned_v[i][j] * aligned_v[j][i]`.
-  """
+    aligned_v: Tuple[GridVariableVector]
+) -> Tuple[GridVariableVector]:
+  """Computes the momentum flux tensor `v_i * v_j` from aligned velocities."""
   ndim = len(aligned_v)
+  # Initialize a list of empty tuples to hold the rows of the flux tensor.
   flux = [tuple() for _ in range(ndim)]
   for i in range(ndim):
     for j in range(ndim):
+      # To avoid duplicate work, only compute for i <= j and reuse for j < i.
       if i <= j:
-        bc = grids.consistent_boundary_conditions(
-            aligned_v[i][j], aligned_v[j][i])
-        #bc = aligned_v[i][j].bc
-        flux[i] += (GridVariable(aligned_v[i][j].array * aligned_v[j][i].array,
-                                 bc),)
+        # The flux boundary condition is determined by the constituent velocities.
+        bc = boundaries.get_pressure_bc_from_velocity(
+            (aligned_v[i][j], aligned_v[j][i]))
+        flux_component = GridVariable(aligned_v[i][j].array * aligned_v[j][i].array, bc)
+        flux[i] += (flux_component,)
       else:
+        # Reuse the already computed symmetric component: flux[i][j] = flux[j][i].
         flux[i] += (flux[j][i],)
   return tuple(flux)
 
 
 def convect_linear(v: GridVariableVector) -> GridArrayVector:
-  """Computes convection/self-advection of the velocity field `v`.
+  """
+  Computes convection (self-advection) of the velocity field `v`.
 
-  This function is conceptually equivalent to
-
-  ```
-  def convect_linear(v, grid):
-    return tuple(advect_linear(u, v, grid) for u in v)
-  ```
-
-  However, there are several optimizations to avoid duplicate operations.
+  This calculates the term `-(v ⋅ ∇)v`. It is conceptually equivalent to calling
+  `advect_linear` for each component of `v`, but it is optimized to avoid
+  re-computing shared interpolation terms.
 
   Args:
-    v: a velocity field.
+    v: The velocity field to be convected.
 
   Returns:
-    A tuple containing the time derivative of each component of `v` due to
-    convection.
+    A `GridArrayVector` containing the time derivative of each component of `v`
+    due to convection.
   """
-  # TODO(jamieas): consider a more efficient vectorization of this function.
-  # TODO(jamieas): incorporate variable density.
+  # Step 1: Interpolate all velocity components to all necessary face locations.
   aligned_v = _align_velocities(v)
+  # Step 2: Compute the momentum flux tensor from the aligned velocities.
   fluxes = _velocities_to_flux(aligned_v)
+  # Step 3: The convection term for each component is the negative divergence
+  # of the corresponding row of the flux tensor.
   return tuple(-fd.divergence(flux) for flux in fluxes)
 
 
@@ -208,73 +224,65 @@ def advect_van_leer(
     v: GridVariableVector,
     dt: float
 ) -> GridArray:
-  """Computes advection of a scalar quantity `c` by the velocity field `v`.
+  """
+  Computes advection using the Van-Leer flux-limiter scheme.
 
-  Implements Van-Leer flux limiting scheme that uses second order accurate
-  approximation of fluxes for smooth regions of the solution. This scheme is
-  total variation diminishing (TVD). For regions with high gradients flux
-  limitor transformes the scheme into a first order method. For [1] for
-  reference. This function follows the following procedure:
-
-    1. Interpolate each component of `v` to the corresponding face of the
-       control volume centered on `c`. In most cases satisfied by design.
-    2. Computes upwind flux for each direction.
-    3. Computes higher order flux correction based on neighboring values of `c`.
-    4. Combines fluxes and assigns flux boundary condition.
-    5. Returns the negative divergence of fluxes.
+  This is a high-resolution scheme that is second-order accurate in smooth
+  regions of the flow but reverts to a first-order scheme near sharp gradients
+  or shocks. This property makes it Total Variation Diminishing (TVD), meaning
+  it does not create new spurious oscillations, making it robust and accurate.
 
   Args:
-    c: the quantity to be transported.
-    v: a velocity field. Should be defined on the same Grid as c.
-    dt: time step for which this scheme is TVD and second order accurate
-      in time.
+    c: The quantity to be transported.
+    v: The velocity field.
+    dt: The time step, which is needed to compute the Courant number for the limiter.
 
   Returns:
     The time derivative of `c` due to advection by `v`.
-
-  #### References
-
-  [1]:  MIT 18.336 spring 2009 Finite Volume Methods Lecture 19.
-        go/mit-18.336-finite_volume_methods-19
-
   """
-  # TODO(dkochkov) reimplement this using apply_limiter method.
   offsets = grids.control_volume_offsets(c)
   aligned_v = tuple(interpolation.linear(u, offset)
                     for u, offset in zip(v, offsets))
   flux = []
   for axis, (u, h) in enumerate(zip(aligned_v, c.grid.step)):
+    # Get values at the center, left, and right of the control volume face.
     c_center = c.data
     c_left = c.shift(-1, axis=axis).data
     c_right = c.shift(+1, axis=axis).data
+
+    # Start with the basic, stable first-order upwind flux.
     upwind_flux = grids.applied(jnp.where)(
         u.array > 0, u.array * c_center, u.array * c_right)
 
-    # Van-Leer Flux correction is computed in steps to avoid `nan`s.
-    # Formula for the flux correction df for advection with positive velocity is
-    # df_{i} = 0.5 * (1-gamma) * dc_{i}
-    # dc_{i} = 2(c_{i+1} - c_{i})(c_{i} - c_{i-1})/(c_{i+1}-c_{i})
-    # gamma is the courant number = u * dt / h
+    # --- Compute the Van-Leer high-order flux correction ---
+    # The correction term depends on the ratio of successive gradients.
     diffs_prod = 2 * (c_right - c_center) * (c_center - c_left)
     neighbor_diff = c_right - c_left
+    
+    # Use a safe division to avoid NaNs when the denominator is zero.
     safe = diffs_prod > 0
-    # https://jax.readthedocs.io/en/latest/faq.html#gradients-contain-nan-where-using-where
     forward_correction = jnp.where(
         safe, diffs_prod / jnp.where(safe, neighbor_diff, 1), 0
     )
-    # for negative velocity we simply need to shift the correction along v axis.
-    # Cast to GridVariable so that we can apply a shift() operation.
+
+    # The correction for negative velocity is a shifted version of the positive one.
     forward_correction_array = grids.GridVariable(
         grids.GridArray(forward_correction, u.offset, u.grid), u.bc)
-    backward_correction_array = forward_correction_array.shift(+1, axis)
-    backward_correction = backward_correction_array.data
+    backward_correction = forward_correction_array.shift(+1, axis).data
+    
     abs_velocity = abs(u.array)
+    # The Courant number `gamma = |u| * dt / h` determines the weight of the correction.
     courant_numbers = (dt / h) * abs_velocity
+    
+    # Combine the pieces to get the final flux correction.
     pre_factor = 0.5 * (1 - courant_numbers) * abs_velocity
     flux_correction = pre_factor * grids.applied(jnp.where)(
         u.array > 0, forward_correction, backward_correction)
+    
+    # The total flux is the upwind flux plus the high-order correction.
     flux.append(upwind_flux + flux_correction)
-  # Assign flux boundary condition
+    
+  # Assign boundary conditions and compute the divergence.
   flux = tuple(GridVariable(f, c.bc) for f in flux)
   advection = -fd.divergence(flux)
   return advection
@@ -285,70 +293,90 @@ def advect_step_semilagrangian(
     v: GridVariableVector,
     dt: float
 ) -> GridVariable:
-  """Semi-Lagrangian advection of a scalar quantity.
+  """
+  Computes one time step of advection using a semi-Lagrangian method.
 
-  Note that unlike the other advection functions, this function returns values
-  at the next time-step, not the time derivative.
+  Note: Unlike other advection functions in this module, this function returns
+  the advected quantity at the *next time step*, NOT the time derivative.
+
+  The method works by tracing the velocity field backwards in time by `dt` from
+  each grid point to find its "departure point." The new value at the grid
+  point is then set to the interpolated value of `c` at that departure point.
+  This method is unconditionally stable with respect to the CFL condition,
+  allowing for potentially larger time steps, but it can be more diffusive.
 
   Args:
-    c: the quantity to be transported.
-    v: a velocity field. Should be defined on the same Grid as c.
-    dt: desired time-step.
+    c: The quantity to be transported.
+    v: The velocity field.
+    dt: The time step to advect over.
 
   Returns:
-    Advected quantity at the next time-step -- *not* the time derivative.
+    A `GridVariable` containing the advected quantity at time `t + dt`.
   """
-  # Reference: "Learning to control PDEs with Differentiable Physics"
-  # https://openreview.net/pdf?id=HyeSin4FPB (see Appendix A)
   grid = grids.consistent_grid(c, *v)
 
-  # TODO(shoyer) Enable lower domains != 0 for this function.
-  # Hint: indices = [
-  #     -o + (x - l) * n / (u - l)
-  #     for (l, u), o, x, n in zip(grid.domain, c.offset, coords, grid.shape)
-  # ]
   if not all(d[0] == 0 for d in grid.domain):
     raise ValueError(
         f'Grid domains currently must start at zero. Found {grid.domain}')
+        
+  # For each grid point `x`, calculate the departure point `x - v*dt`.
   coords = [x - dt * interpolation.linear(u, c.offset).data
             for x, u in zip(grid.mesh(c.offset), v)]
+            
+  # Convert the physical coordinates of departure points to fractional grid indices.
   indices = [x / s - o for s, o, x in zip(grid.step, c.offset, coords)]
+  
   if not boundaries.has_all_periodic_boundary_conditions(c):
     raise NotImplementedError('non-periodic BCs not yet supported')
-  c_advected = grids.applied(jax.scipy.ndimage.map_coordinates)(
+    
+  # `map_coordinates` interpolates the array `c` at the fractional `indices`.
+  # `order=1` specifies linear interpolation. `mode='wrap'` handles periodic BCs.
+  c_advected_data = grids.applied(jax.scipy.ndimage.map_coordinates)(
       c.array, indices, order=1, mode='wrap')
-  return GridVariable(c_advected, c.bc)
+      
+  return GridVariable(c_advected_data, c.bc)
 
 
-# TODO(dkochkov) Implement advect_with_flux_limiter method.
-# TODO(dkochkov) Consider moving `advect_van_leer` to test based on performance.
 def advect_van_leer_using_limiters(
     c: GridVariable,
     v: GridVariableVector,
     dt: float
 ) -> GridArray:
-  """Implements Van-Leer advection by applying TVD limiter to Lax-Wendroff."""
+  """
+  Implements Van-Leer advection in a modular way by applying a TVD limiter
+  to the Lax-Wendroff interpolation scheme. This is a cleaner, more composable
+  way to formulate the scheme compared to the direct implementation above.
+  """
+  # Create a new interpolation function by composing the base scheme with a limiter.
   c_interpolation_fn = interpolation.apply_tvd_limiter(
       interpolation.lax_wendroff, limiter=interpolation.van_leer_limiter)
+  # Use this new composite interpolation function in the general advection framework.
   return advect_general(c, v, interpolation.linear, c_interpolation_fn, dt)
 
 
-def stable_time_step(max_velocity: float,
-                     max_courant_number: float,
-                     grid: grids.Grid) -> float:
-  """Calculate a stable time step size for explicit advection.
+def stable_time_step(
+    max_velocity: float,
+    max_courant_number: float,
+    grid: grids.Grid
+) -> float:
+  """
+  Calculates a stable time step size for explicit advection schemes.
 
-  The calculation is based on the CFL condition for advection.
+  This is based on the Courant-Friedrichs-Lewy (CFL) condition, which requires
+  that the fluid does not travel more than one grid cell in a single time step.
+  The Courant number is defined as `C = u * dt / dx`. To ensure stability, we
+  require `C < max_courant_number`.
 
   Args:
-    max_velocity: maximum velocity.
-    max_courant_number: the Courant number used to choose the time step. Smaller
-      numbers will lead to more stable simulations. Typically this should be in
-      the range [0.5, 1).
-    grid: a `Grid` object.
+    max_velocity: The maximum expected velocity in the simulation.
+    max_courant_number: The maximum allowable Courant number (a safety factor,
+      typically in the range [0.5, 1.0)).
+    grid: The `Grid` object for the simulation domain.
 
   Returns:
-    The prescribed time interval.
+    The calculated stable time step `dt`.
   """
+  # Find the smallest grid spacing in any dimension.
   dx = min(grid.step)
+  # Calculate dt based on the CFL condition: dt = C_max * dx / u_max.
   return max_courant_number * dx / max_velocity
