@@ -46,9 +46,13 @@ class particle:
     geometry_param: Sequence[Any]
     Grid: Grid1d
     shape: Callable
-    
-    # --- REMOVED OBSOLETE KINEMATIC ATTRIBUTES ---
-    # displacement_param, rotation_param, Displacement_EQ, Rotation_EQ are gone.
+
+    # --- OBSOLETE KINEMATIC ATTRIBUTES ---
+    # displacement_param, rotation_param, Displacement_EQ, Rotation_EQ not needed.
+    # displacement_param: Sequence[Any]
+    # rotation_param: Sequence[Any]
+    # Displacement_EQ: Callable
+    # Rotation_EQ: Callable
 
     def tree_flatten(self):
       """Updated flattening recipe."""
