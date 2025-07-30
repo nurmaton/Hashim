@@ -28,9 +28,8 @@ The method consists of two main steps:
     gradient of the pressure, `v_new = v* - ∇p`. This correction term ensures
     that the final velocity field `v_new` is divergence-free.
 
-This module provides several specialized functions (`solve_fast_diag`,
-`solve_fast_diag_moving_wall`, etc.) to solve the Poisson equation efficiently
-for different types of boundary conditions.
+This module provides several specialized functions to solve the Poisson equation
+efficiently for different types of boundary conditions.
 """
 
 from typing import Callable, Optional
@@ -56,11 +55,12 @@ BoundaryConditions = grids.BoundaryConditions
 
 def laplacian_matrix_neumann(size: int, step: float) -> np.ndarray:
   """
-  Creates a 1D finite difference Laplacian matrix with homogeneous Neumann BC.
+  Creates a 1D finite difference Laplacian operator matrix with homogeneous Neumann BC.
 
   This is a helper function used to construct the Poisson solver for non-periodic
-  domains. The stencil at the boundary is modified to reflect the zero-flux
-  condition.
+  domains. The standard central difference stencil is `[1, -2, 1]/step^2`. For a
+  Neumann condition (zero-flux), the stencil at the boundary is modified to be
+  `[-1, 1]` effectively, which changes the diagonal `[-2]` term to `[-1]`.
 
   Args:
     size: The number of grid points in the dimension.
@@ -69,13 +69,14 @@ def laplacian_matrix_neumann(size: int, step: float) -> np.ndarray:
   Returns:
     A NumPy array representing the 1D Neumann Laplacian operator.
   """
-  # Start with the standard central difference stencil `[1, -2, 1]/step^2`.
+  # Start with the standard central difference stencil for the first column.
   column = np.zeros(size)
   column[0] = -2 / step ** 2
   column[1] = 1 / step ** 2
-  # `toeplitz` creates the full matrix from this first column.
+  # `scipy.linalg.toeplitz` creates the full matrix from this first column,
+  # resulting in a symmetric matrix with the desired stencil on the inner diagonals.
   matrix = scipy.linalg.toeplitz(column)
-  # Modify the diagonal elements at the boundaries to enforce the Neumann condition.
+  # Modify the diagonal elements at the two boundaries to enforce the Neumann condition.
   matrix[0, 0] = matrix[-1, -1] = -1 / step**2
   return matrix
 
@@ -89,8 +90,9 @@ def _rhs_transform(
 
   When a Poisson equation `∇²x = u` has Neumann boundary conditions on all sides,
   a solution `x` only exists if the integral (or mean) of the right-hand-side `u`
-  is zero. This function enforces this condition by subtracting the mean from `u`.
-  This is necessary for the stability and solvability of the linear system.
+  is zero. This is a mathematical solvability condition. This function enforces
+  this condition by subtracting the mean from `u`. The solution `x` is then
+  unique up to an arbitrary additive constant.
 
   Args:
     u: A `GridArray` for the RHS of the Poisson equation (i.e., the divergence).
@@ -107,7 +109,6 @@ def _rhs_transform(
   )
   if is_all_neumann:
     # If so, subtract the mean from the data to satisfy the solvability condition.
-    # The solution is then unique up to an arbitrary constant.
     u_data = u_data - jnp.mean(u_data)
   return u_data
   
@@ -134,7 +135,7 @@ def projection_and_update_pressure(
     A new `All_Variables` object with a divergence-free velocity field and
     updated pressure.
   """
-  # Unpack the current state.
+  # Unpack the current state variables.
   v = All_variables.velocity
   old_pressure = All_variables.pressure
   particles = All_variables.particles
@@ -146,7 +147,7 @@ def projection_and_update_pressure(
   # Determine the appropriate pressure boundary conditions from the velocity BCs.
   pressure_bc = boundaries.get_pressure_bc_from_velocity(v)
 
-  # `q` represents the pressure *correction* for this time step.
+  # `q` represents the pressure *correction* for this time step, not the total pressure.
   # An initial guess `q0` (zero) is created for solvers that might need it.
   q0 = grids.GridArray(jnp.zeros(grid.shape), grid.cell_center, grid)
   q0 = grids.GridVariable(q0, pressure_bc)
@@ -168,8 +169,8 @@ def projection_and_update_pressure(
   v_projected = tuple(
       grids.GridVariable(u.array - q_g, u.bc) for u, q_g in zip(v, q_grad))
       
-  # For non-periodic domains, re-impose the BCs on the corrected velocity field
-  # to ensure consistency at the boundaries.
+  # For non-periodic domains, it's good practice to re-impose the BCs on the
+  # corrected velocity field to ensure consistency at the boundaries.
   if not boundaries.has_all_periodic_boundary_conditions(*v):
     v_projected = tuple(u.impose_bc() for u in v_projected)
   
@@ -187,31 +188,45 @@ def solve_fast_diag(
   Solves the Poisson equation for fully periodic domains using a Fast Diagonalization solver.
 
   This is a highly efficient direct (non-iterative) solver that works by
-  transforming the problem into Fourier space using the FFT. In Fourier space,
-  the Laplacian operator becomes a simple diagonal matrix, making the solution trivial.
+  transforming the problem into Fourier space using the Fast Fourier Transform (FFT).
+  In Fourier space, the Laplacian operator `∇²` becomes a simple diagonal matrix of
+  its eigenvalues, which makes solving the system `Â * p̂ = b̂` a trivial
+  element-wise division: `p̂ = b̂ / Â`.
 
   Args:
-    v: The velocity vector field. The RHS of the Poisson equation is `∇ ⋅ v`.
-    q0: An initial guess for pressure (unused, for API compatibility).
-    implementation: Backend for the solver (unused, for API compatibility).
+    v: The velocity vector field. The RHS of the Poisson equation, `∇ ⋅ v`, is
+      computed internally.
+    q0: An initial guess for pressure (unused, kept for API compatibility with
+      iterative solvers).
+    implementation: A string to select a specific backend implementation for the
+      solver if available (unused here).
 
   Returns:
     A `GridArray` containing the solution for the pressure correction `q`.
   """
-  del q0  # Mark unused argument.
+  # Mark unused arguments to clarify they are not used in this specific solver.
+  del q0
+  
+  # This solver is only mathematically valid for fully periodic domains.
   if not boundaries.has_all_periodic_boundary_conditions(*v):
     raise ValueError('solve_fast_diag() expects periodic velocity BCs')
   
+  # Ensure all velocity components are on the same grid.
   grid = grids.consistent_grid(*v)
-  # The RHS of the Poisson equation is the divergence of the velocity field.
+  # The Right-Hand Side (RHS) of the Poisson equation is the divergence of the velocity field.
   rhs = fd.divergence(v)
-  # Get the 1D periodic Laplacian matrices for each dimension.
+  
+  # Get the 1D periodic Laplacian matrices for each dimension of the grid. These
+  # matrices represent the `∇²` operator in real space.
   laplacians = list(map(array_utils.laplacian_matrix, grid.shape, grid.step))
-  # Create the pseudoinverse solver, which pre-computes the FFT plans and eigenvalues.
+  
+  # Create the pseudoinverse solver. This pre-computes the FFT plans and the
+  # eigenvalues of the Laplacian, which are needed to perform the division in Fourier space.
   pinv = fast_diagonalization.pseudoinverse(
       laplacians, rhs.dtype,
       hermitian=True, circulant=True, implementation=implementation)
-  # Apply the solver to the RHS.
+      
+  # Apply the solver (which performs FFT -> divide -> IFFT) to the RHS.
   return grids.applied(pinv)(rhs)
 
 
@@ -224,25 +239,29 @@ def solve_fast_diag_moving_wall(
   Solves the Poisson equation for a channel flow setup (periodic in x, Neumann in y)
   using a specialized Fast Diagonalization solver.
 
-  This solver uses FFTs for the periodic dimension(s) but must use other fast
-  transforms (like the Discrete Sine/Cosine Transform) or matrix multiplication
-  for the non-periodic Neumann dimension(s).
+  This solver is a hybrid. It uses the efficient FFT for the periodic dimension(s)
+  but must use other fast transforms (like the Discrete Sine/Cosine Transform, which
+  are implicitly handled by the diagonalization of the Neumann matrix) or direct
+  matrix multiplication for the non-periodic Neumann dimension(s).
   """
-  del q0  # Mark unused argument.
+  del q0 # Mark unused argument.
   ndim = len(v)
 
   grid = grids.consistent_grid(*v)
   rhs = fd.divergence(v)
-  # Create the 1D Laplacian matrices for each axis.
+  
+  # Create the 1D Laplacian matrices, using the special Neumann matrix for the y-axis (axis 1).
   laplacians = [
-      array_utils.laplacian_matrix(grid.shape[0], grid.step[0]), # Periodic in x
-      laplacian_matrix_neumann(grid.shape[1], grid.step[1]), # Neumann in y
+      array_utils.laplacian_matrix(grid.shape[0], grid.step[0]),           # Periodic in x
+      array_utils.laplacian_matrix_neumann(grid.shape[1], grid.step[1]), # Neumann in y
   ]
-  # Add periodic matrices for any higher dimensions (for 3D channel flow).
+  # Add periodic matrices for any higher dimensions (e.g., for a 3D channel flow).
   for d in range(2, ndim):
     laplacians += [array_utils.laplacian_matrix(grid.shape[d], grid.step[d])]
+    
   # Create and apply the pseudoinverse solver. `circulant=False` indicates that
-  # not all matrices are periodic.
+  # at least one of the matrices is not circulant (i.e., not periodic), so a
+  # pure FFT-based method cannot be used for all dimensions.
   pinv = fast_diagonalization.pseudoinverse(
       laplacians, rhs.dtype,
       hermitian=True, circulant=False, implementation=implementation)
@@ -255,30 +274,40 @@ def solve_fast_diag_Far_Field(
     implementation: Optional[str] = None
 ) -> GridArray:
   """
-  Solves the Poisson equation for domains with arbitrary Neumann/Dirichlet BCs.
+  Solves the Poisson equation for domains with arbitrary combinations of
+  Neumann and Dirichlet boundary conditions.
 
   This is the most general of the fast diagonalization solvers. It constructs the
   appropriate 1D Laplacian matrices for each boundary condition type along each axis.
-  It also ensures the RHS is transformed correctly for all-Neumann domains.
+  It also ensures the RHS is transformed correctly for the special case of all-Neumann
+  domains to guarantee a solution exists.
   """
-  del q0  # Mark unused argument.
+  del q0 # Mark unused argument.
 
   grid = grids.consistent_grid(*v)
   rhs = fd.divergence(v)
+  # Infer the correct pressure BCs from the velocity BCs.
   pressure_bc = boundaries.get_pressure_bc_from_velocity(v)
   # Subtract the mean from the RHS if the domain is all-Neumann.
-  rhs_transformed = _rhs_transform(rhs, pressure_bc)
+  rhs_transformed_data = _rhs_transform(rhs, pressure_bc)
+  rhs_transformed = grids.GridArray(rhs_transformed_data, rhs.offset, rhs.grid)
   
-  # This helper function builds the list of 1D Laplacian matrices based on the
-  # specific boundary conditions for each axis.
+  # The commented out code shows a manual construction of the Laplacian matrices.
+  # laplacians = [
+  #           laplacian_matrix_neumann(grid.shape[0], grid.step[0]),
+  #           laplacian_matrix_neumann(grid.shape[1], grid.step[1]),
+  # ]
+  
+  # This helper function automatically builds the list of 1D Laplacian matrices
+  # based on the specific boundary conditions for each axis.
   laplacians = array_utils.laplacian_matrix_w_boundaries(
       rhs.grid, rhs.offset, pressure_bc)
-  
+      
   # Create and apply the general-purpose pseudoinverse solver.
   pinv = fast_diagonalization.pseudoinverse(
       laplacians, rhs_transformed.dtype,
       hermitian=True, circulant=False, implementation='matmul')
-  return grids.applied(pinv)(rhs)
+  return grids.applied(pinv)(rhs_transformed)
 
 def calc_P(
     v: GridVariableVector,
@@ -294,7 +323,7 @@ def calc_P(
 
   Args:
     v: The velocity vector field.
-    solve: The solver function to use.
+    solve: The solver function to use (defaults to the periodic solver).
 
   Returns:
     A `GridVariable` containing the pressure correction field `q`.
@@ -306,7 +335,7 @@ def calc_P(
   q0 = grids.GridArray(jnp.zeros(grid.shape), grid.cell_center, grid)
   q0 = grids.GridVariable(q0, pressure_bc)
 
-  # Solve for the pressure correction data.
+  # Solve for the pressure correction data using the provided `solve` function.
   q_data = solve(v, q0)
   # Wrap the data in a GridVariable.
   q = grids.GridVariable(grids.GridArray(q_data, q0.offset, q0.grid), pressure_bc)
