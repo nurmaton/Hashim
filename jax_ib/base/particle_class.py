@@ -1,3 +1,26 @@
+# Copyright 2021 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+"""
+Defines the data structures for representing particles in the simulation.
+
+This module contains the core classes for managing the state of dynamic,
+deformable particles. The classes are designed as JAX PyTrees, which allows them
+to be seamlessly integrated into JAX's compiled and auto-differentiable
+workflows (`jit`, `vmap`, `scan`, etc.). This is a fundamental change from the
+previous version, which was designed for pre-determined kinematic motion.
+"""
+
 import dataclasses
 from typing import Any, Callable, Sequence, Tuple, Union
 
@@ -6,73 +29,80 @@ import jax.numpy as jnp
 from jax.tree_util import register_pytree_node_class
 from jax_ib.base import grids
 
+# Type aliases for clarity.
 Array = Union[jnp.ndarray, jnp.ndarray]
 PyTree = Any
 
 # --- UNCHANGED UTILITY CLASS ---
-# This class for generating a 1D grid of points was simple and effective in both versions.
-# It's used to generate the initial Lagrangian marker positions from the shape function.
 @dataclasses.dataclass(init=False, frozen=True)
 class Grid1d:
+    """
+    A simple 1D grid generator.
+
+    This utility class creates a 1D grid of uniformly spaced points within a
+    specified domain. Its primary use here is to generate the initial set of
+    Lagrangian marker points that define the particle's shape at the start of
+    the simulation. Its function is identical to the old version.
+    """
     shape: Tuple[int, ...]
     step: Tuple[float, ...]
     domain: Tuple[Tuple[float, float], ...]
+
     def __init__(self, shape: Sequence[int], domain: Tuple[float, float]):
+        """Initializes the 1D grid."""
         shape = shape
+        # Use object.__setattr__ because the dataclass is frozen.
         object.__setattr__(self, 'shape', shape)
         object.__setattr__(self, 'domain', domain)
+        # Calculate the step size between points.
         step = (domain[1] - domain[0]) / (shape - 1)
         object.__setattr__(self, 'step', step)
+
     @property
-    def ndim(self) -> int: return 1
+    def ndim(self) -> int:
+        """Returns the number of dimensions, which is always 1."""
+        return 1
+
     def mesh(self, offset=None) -> Tuple[Array, ...]:
+        """Generates the array of grid points."""
         return self.domain[0] + jnp.arange(self.shape) * self.step
 
 # --- HEAVILY REWRITTEN CORE CLASS ---
-#
-# OLD vs NEW COMPARISON & EXPLANATION:
-#
-# WHY THE CHANGE WAS MADE:
-# The OLD `particle` class was designed for a kinematically-prescribed rigid body. It stored
-# parameters for motion functions (`displacement_param`, `rotation_param`) but did not store
-# the actual, evolving state of the particle's boundary points. The NEW version is designed
-# for a dynamic, deformable body, so its primary role is to BE the state container.
-#
-# KEY DIFFERENCES:
-# 1. ATTRIBUTES:
-#    - OLD: Held parameters and functions (`Displacement_EQ`, `Rotation_EQ`) to CALCULATE
-#           the particle's position at any given time `t`.
-#    - NEW: Holds the actual, current state variables (`xp`, `yp`, `Ym_x`, `Ym_y`, etc.) that
-#           are UPDATED at each time step. It also holds the physical properties (`stiffness`, `sigma`).
-#
-# 2. JAX PYTREE (`tree_flatten`):
-#    - OLD: Only tracked the kinematic parameters as dynamic children.
-#    - NEW: Correctly tracks all the dynamic state arrays (positions, velocities) as children.
-#           This is CRITICAL for the simulation to work correctly with JAX's compilation and
-#           automatic differentiation.
-#
-# WHY THE NEW METHOD IS BETTER:
-#    - It represents the true state of a dynamic object. Its attributes are the variables
-#      that evolve according to the equations of motion.
-#    - It is much cleaner, having removed all the obsolete kinematic parameters and functions.
-#
 @register_pytree_node_class
 @dataclasses.dataclass
 class particle:
+    """
+    Represents the full dynamic state of a single deformable particle.
+
+    WHY THE CHANGE WAS MADE:
+    The OLD `particle` class was for a kinematically-prescribed rigid body. It
+    stored parameters for motion functions (`displacement_param`, `Rotation_EQ`)
+    to CALCULATE the particle's position at any time `t`. It did not store the
+    evolving state.
+    
+    The NEW version is for a DYNAMIC, DEFORMABLE body. Its primary role is to BE
+    the state container. Its attributes are the actual state variables (positions,
+    velocities) that are updated at each time step according to the physics.
+
+    This class is registered as a JAX PyTree, which is critical for the simulation.
+    It tells JAX which attributes are dynamic "children" to be traced and updated
+    inside compiled functions.
+    """
     # --- DYNAMIC STATE VARIABLES (The core of the new design) ---
-    # These arrays represent the full state of the particle at any given moment.
-    xp: jax.numpy.ndarray      # Current fluid marker x-positions (Xm_i in paper)
-    yp: jax.numpy.ndarray      # Current fluid marker y-positions (Xm_i in paper)
-    Ym_x: jax.numpy.ndarray    # Mass marker x-positions (Ym_i in paper)
-    Ym_y: jax.numpy.ndarray    # Mass marker y-positions (Ym_i in paper)
-    Vm_x: jax.numpy.ndarray    # Mass marker x-velocities
-    Vm_y: jax.numpy.ndarray    # Mass marker y-velocities
+    # These arrays represent the full state of the particle at any given moment
+    # and are updated by the solver at each time step.
+    xp: jax.numpy.ndarray      # Current fluid-interacting marker x-positions (X in paper)
+    yp: jax.numpy.ndarray      # Current fluid-interacting marker y-positions (X in paper)
+    Ym_x: jax.numpy.ndarray    # Mass-carrying marker x-positions (Y in paper)
+    Ym_y: jax.numpy.ndarray    # Mass-carrying marker y-positions (Y in paper)
+    Vm_x: jax.numpy.ndarray    # Mass-carrying marker x-velocities
+    Vm_y: jax.numpy.ndarray    # Mass-carrying marker y-velocities
     
     # --- PHYSICAL PROPERTIES ---
-    # These define the physical nature of the deformable body.
+    # These are physical constants that define the nature of the deformable body.
     mass_per_marker: float
-    stiffness: float
-    sigma: float
+    stiffness: float           # The penalty spring constant, Kp.
+    sigma: float               # The surface tension coefficient.
     
     # --- STATIC GEOMETRY and INITIALIZATION INFO ---
     # These are used to create the initial state but do not change during the simulation.
@@ -83,58 +113,85 @@ class particle:
     
     # --- REMOVED OBSOLETE KINEMATIC ATTRIBUTES ---
     # The old class had: displacement_param, rotation_param, Displacement_EQ, Rotation_EQ.
-    # These have been removed because the motion is now CALCULATED, not prescribed.
+    # These have been removed because the motion is now CALCULATED from forces, not prescribed.
 
     def tree_flatten(self):
-      """Updated flattening recipe to include all dynamic state variables."""
+      """
+      Defines how to flatten this object for JAX PyTree processing.
+      
+      JAX needs to know which parts are dynamic arrays/tracers ("children")
+      and which are static metadata ("aux_data").
+      """
+      # The children are all the dynamic state arrays and physical properties
+      # that might be involved in JAX transformations (like differentiation or jit).
       children = (self.xp, self.yp, self.Ym_x, self.Ym_y, self.Vm_x, self.Vm_y,
                   self.mass_per_marker, self.stiffness, self.sigma,
                   self.particle_center, self.geometry_param)
+      # The auxiliary data consists of static elements like the grid generator
+      # and the shape function, which do not change and are not traced by JAX.
       aux_data = (self.Grid, self.shape)
       return children, aux_data
 
     @classmethod
     def tree_unflatten(cls, aux_data, children):
-       """Updated unflattening recipe."""
+       """Defines how to reconstruct the object from its flattened parts."""
        return cls(*children, *aux_data)
 
 # --- NEW CONTAINER CLASS ---
-# OLD vs NEW: The OLD code passed around a raw Python list of particle objects.
-# The NEW approach uses a dedicated JAX Pytree container (`particle_lista`).
-# WHY THE NEW METHOD IS BETTER: This makes the code more robust and scalable. By defining
-# `tree_flatten` and `tree_unflatten`, we can treat a collection of many particles
-# as a single object that JAX can handle efficiently.
 @register_pytree_node_class
 @dataclasses.dataclass
 class particle_lista:
+    """
+    A JAX PyTree container for a sequence of particle objects.
+
+    WHY THIS CLASS IS NEEDED:
+    A standard Python list is "opaque" to JAX's `jit` compiler. JAX cannot see
+    inside it to trace the operations on the elements. By creating this custom
+    container and registering it as a PyTree, we can treat a collection of many
+    particles as a single object that JAX can handle efficiently. This is crucial
+    for performance and for scaling the simulation to multiple particles.
+    """
     particles: Sequence[particle,]
     
     def tree_flatten(self):
+      """Flattens the container by treating each particle in the sequence as a child."""
       children = tuple(self.particles)
-      aux_data = None
+      aux_data = None  # No static auxiliary data for this simple container.
       return children, aux_data
 
     @classmethod
     def tree_unflatten(cls, aux_data, children):
+       """Reconstructs the container from the sequence of children (particles)."""
        return cls(particles=list(children))
 
 # --- UPDATED CONTAINER CLASS ---
-# OLD vs NEW: This class is structurally similar, but its `particles` attribute
-# now holds the new `particle_lista` object instead of a simple list. Its `tree_flatten`
-# method ensures that this container is also a valid JAX pytree.
 @register_pytree_node_class
 @dataclasses.dataclass
 class All_Variables: 
-    particles: particle_lista
-    velocity: grids.GridVariableVector
-    pressure: grids.GridVariable
-    Drag:Sequence[Any]
-    Step_count:int
-    MD_var:Any
+    """
+    The top-level container for the entire simulation state.
+
+    This class holds all the variables that define the state of the simulation
+    at a single point in time. It is a JAX PyTree, allowing the entire state
+    to be passed into and out of the main `jax.lax.scan` loop efficiently.
+
+    The primary change from the old version is that the `particles` attribute
+    now holds the new `particle_lista` PyTree container.
+    """
+    particles: particle_lista            # The PyTree container for all particle states.
+    velocity: grids.GridVariableVector # The fluid velocity field (u, v).
+    pressure: grids.GridVariable       # The fluid pressure field.
+    Drag: Sequence[Any]                # For storing simulation outputs like drag force.
+    Step_count: int                    # The current simulation step number.
+    MD_var: Any                        # For other miscellaneous diagnostic variables.
+
     def tree_flatten(self):
-      children = (self.particles,self.velocity,self.pressure,self.Drag,self.Step_count,self.MD_var,)
+      """Flattens the entire simulation state into a tuple of children."""
+      children = (self.particles, self.velocity, self.pressure, self.Drag, self.Step_count, self.MD_var)
       aux_data = None
       return children, aux_data
+
     @classmethod
     def tree_unflatten(cls, aux_data, children):
-       return cls(*children)
+       """Reconstructs the simulation state from its flattened parts."""
+       return cls(*children)```
