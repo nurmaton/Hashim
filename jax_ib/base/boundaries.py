@@ -11,7 +11,16 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Classes that specify how boundary conditions are applied to arrays."""
+"""
+Classes that specify how boundary conditions are applied to arrays.
+
+This module provides the core data structures and logic for defining and applying
+boundary conditions (BCs) to the physical fields in the simulation. In finite
+difference/volume methods, values must be defined in "ghost cells" just outside
+the computational domain to correctly calculate derivatives at the boundaries.
+This module implements the logic for filling those ghost cells according to
+different physical conditions.
+"""
 
 import dataclasses
 from typing import Any, Callable, Iterable, Sequence, Tuple, Optional, Union
@@ -24,7 +33,8 @@ import scipy
 from jax.tree_util import register_pytree_node_class
 from jax_ib.base import particle_class
 
-# Type aliases for clarity and conciseness.
+# --- Type Aliases ---
+# Defines convenient, readable aliases for the core data structures from the `grids` module.
 BoundaryConditions = grids.BoundaryConditions
 GridArray = grids.GridArray
 GridVariable = grids.GridVariable
@@ -34,40 +44,57 @@ BCArray = grids.BCArray
 
 
 class BCType:
-  """Defines string constants for different types of boundary conditions."""
-  PERIODIC = 'periodic'  # Value wraps around from the end to the beginning.
-  DIRICHLET = 'dirichlet'  # Fixed value at the boundary.
-  NEUMANN = 'neumann'      # Fixed gradient at the boundary.
+  """
+  Defines string constants for different types of boundary conditions.
 
+  Using a class for these constants helps prevent typos and makes the code
+  more readable and maintainable compared to using raw strings everywhere.
+  """
+  # Periodic BC: The domain wraps around on itself. What goes out one side
+  # comes in the opposite side. Useful for modeling a small part of a larger, repeating system.
+  PERIODIC = 'periodic'
+  
+  # Dirichlet BC: The value of the variable is fixed at the boundary.
+  # For velocity, this is used to model solid, no-slip walls (v=0) or inflow/outflow with a specified velocity.
+  DIRICHLET = 'dirichlet'
+  
+  # Neumann BC: The gradient (normal derivative) of the variable is fixed at the boundary.
+  # A zero-Neumann condition (`∂v/∂n = 0`) means there is no flux across the boundary
+  # and is often used for pressure at solid walls or for outflow boundaries.
+  NEUMANN = 'neumann'
+
+# This decorator registers the class with JAX, allowing it to be used as a node
+# in a PyTree. This is essential for JAX to be able to trace operations through
+# objects of this class inside `jit`, `vmap`, etc.
 @register_pytree_node_class
+# `init=False` means the dataclass won't generate a default __init__ method.
+# `frozen=False` allows attributes to be set, which is needed by the custom __init__.
 @dataclasses.dataclass(init=False, frozen=False)
 class ConstantBoundaryConditions(BoundaryConditions):
   """
-  Stores and applies boundary conditions for a PDE variable.
+  A concrete implementation of `BoundaryConditions` that handles BCs that are
+  constant in space, but may be dependent on time.
 
   This class holds the configuration for boundary conditions, such as their type
-  (periodic, Dirichlet, etc.) and values. It provides methods to manipulate
-  GridArrays by padding them according to these boundary conditions. This is
-  a core component for finite difference/volume methods where values in
-  "ghost cells" outside the main domain need to be defined.
+  (periodic, Dirichlet, etc.) and values. It provides the core methods to
+  manipulate `GridArray`s by padding them with ghost cells according to the
+  defined boundary conditions.
 
-  This class is registered as a JAX PyTree, allowing it to be used seamlessly
-  within JAX transformations like jit, vmap, and scan.
+  Attributes:
+    types: A tuple of tuples, where `types[i]` is a pair of strings specifying
+      the lower and upper boundary condition types for dimension `i`.
+    bc_values: A tuple of tuples containing the numerical values for Dirichlet or
+      Neumann conditions. For periodic dimensions, the values are typically `None`.
+    boundary_fn: A callable (function) that can be used to describe
+      time-dependent boundary values. It usually takes time `t` as an argument.
+    time_stamp: A float that tracks the current simulation time, for use with `boundary_fn`.
   """
-  # `types` stores the boundary condition type for each dimension's lower and upper boundary.
-  # Example: ((BCType.PERIODIC, BCType.PERIODIC), (BCType.DIRICHLET, BCType.DIRICHLET))
+  # Attribute type hints for clarity.
   types: Tuple[Tuple[str, str], ...]
-  
-  # `bc_values` stores the boundary values corresponding to the types.
-  # For periodic boundaries, this is typically unused.
   bc_values: Tuple[Tuple[Optional[float], Optional[float]], ...]
-
-  # `boundary_fn` is a callable that can describe time-dependent boundary values.
   boundary_fn: Callable[...,Optional[float]]
-
-  # `time_stamp` tracks the current simulation time, for use with `boundary_fn`.
   time_stamp: Optional[float]
-
+  
   def __init__(self,
                time_stamp: Optional[float],
                values: Sequence[Tuple[Optional[float], Optional[float]]],
@@ -82,16 +109,23 @@ class ConstantBoundaryConditions(BoundaryConditions):
       types: A sequence of tuples specifying the boundary types for each dimension.
       boundary_fn: A function that can define time-dependent boundary values.
     """
-    # Ensure types and values are immutable tuples.
+    # Ensure types and values are converted to immutable tuples. This is good practice
+    # for PyTree components, as their structure should not change.
     types = tuple(types)
     values = tuple(values)
-
-    # Because the dataclass is marked with init=False, we use object.__setattr__
-    # to initialize the attributes of the frozen dataclass.
+    boundary_fn = boundary_fn
+    time_stamp = time_stamp
+    
+    # Because the dataclass is marked with `init=False` and `frozen=False`,
+    # we use `object.__setattr__` to initialize the attributes. This is a standard
+    # pattern for custom initialization in such dataclasses.
     object.__setattr__(self, 'bc_values', values)
     object.__setattr__(self, 'boundary_fn', boundary_fn)
+    # The time_stamp is stored, or an empty list if None is provided (though None might be better).
     object.__setattr__(self, 'time_stamp', time_stamp if time_stamp is not None else [])
     object.__setattr__(self, 'types', types)
+    
+    # The commented out lines are likely remnants of a previous implementation idea.
 
 
   def tree_flatten(self):
@@ -104,40 +138,36 @@ class ConstantBoundaryConditions(BoundaryConditions):
     Returns:
       A tuple of "children" (dynamic parts) and "aux_data" (static parts).
     """
-    # `time_stamp` and `bc_values` are treated as dynamic children, allowing them
-    # to be updated within JAX transformations.
-    children = (self.time_stamp, self.bc_values,)
-    # `types` and `boundary_fn` are static auxiliary data, as they define the
-    # structure and behavior, which are not expected to change during a JAX scan.
-    aux_data = (self.types, self.boundary_fn)
+    # `time_stamp` and `bc_values` are treated as dynamic "children". This means
+    # JAX can trace them, and their values can be updated within a `jit` context
+    # (e.g., inside a `lax.scan` loop).
+    children = (self.time_stamp,self.bc_values,)
+    # `types` and `boundary_fn` are static "aux_data". Their structure and identity
+    # are assumed to be constant during a JAX trace.
+    aux_data = (self.types,self.boundary_fn)
     return children, aux_data
 
   @classmethod
   def tree_unflatten(cls, aux_data, children):
     """
     Defines how to reconstruct the object from its flattened parts.
-
-    Args:
-      aux_data: The static data (types, boundary_fn).
-      children: The dynamic data (time_stamp, bc_values).
-
-    Returns:
-      An instance of the class.
+    This is the inverse of `tree_flatten`.
     """
     # Reconstruct the class instance from the unflattened components.
-    # The order of *children and *aux_data must match the __init__ signature.
+    # The order of `*children` and `*aux_data` must match the `__init__` signature.
     return cls(*children, *aux_data)
 
 
   def update_bc_(self, time_stamp: float, dt: float):
     """
-    Updates the time_stamp for time-dependent boundary conditions.
+    Updates the `time_stamp` for time-dependent boundary conditions.
     
-    Note: The logic that uses this has been simplified in `update_BC`,
-    making this method less critical in the current version.
+    Note: The logic that directly uses this has been simplified in the newer
+    `update_BC` pass-through function, making this method less critical in the
+    current main solver loop, but it remains for potential use.
     """
     return time_stamp + dt
-
+       
 
   def shift(
       self,
@@ -146,21 +176,22 @@ class ConstantBoundaryConditions(BoundaryConditions):
       axis: int,
   ) -> GridArray:
     """
-    Shifts a GridArray by a given integer offset along an axis.
+    Shifts a `GridArray` by a given integer `offset` along an `axis`.
 
-    This operation is fundamental for calculating finite differences. For example,
-    to compute a central difference `u(i+1) - u(i-1)`, one can use
-    `u.shift(1, axis) - u.shift(-1, axis)`.
+    This is the primary high-level method used for finite difference calculations.
+    It works by first padding the array with ghost cells in the direction of the
+    shift and then trimming the array from the opposite side.
 
     Args:
-      u: The GridArray to be shifted.
-      offset: The integer amount to shift by (can be positive or negative).
-      axis: The axis along which to perform the shift.
+      u: a `GridArray` object to be shifted.
+      offset: a positive or negative integer specifying the number of grid cells to shift.
+      axis: the axis along which to perform the shift.
 
     Returns:
-      A new GridArray, shifted and padded according to the boundary conditions.
+      A new `GridArray`, shifted and padded according to the boundary conditions.
+      The returned array will have a correspondingly updated `offset`.
     """
-    # Pad the array in the direction of the shift.
+    # Pad the array with ghost cells in the direction of the shift.
     padded = self._pad(u, offset, axis)
     # Trim the array from the opposite direction to complete the shift.
     trimmed = self._trim(padded, -offset, axis)
@@ -173,120 +204,155 @@ class ConstantBoundaryConditions(BoundaryConditions):
       axis: int,
   ) -> GridArray:
     """
-
     Pads a GridArray with ghost cells according to the boundary conditions.
 
-    This method is the core of boundary condition implementation. It extends the
-    data array with extra cells ("ghost cells") whose values are determined
-    by the boundary condition type (periodic, Dirichlet, or Neumann).
+    This method is the core of the boundary condition implementation. It extends
+    the data array with extra cells ("ghost cells") whose values are determined
+    by the boundary condition type (periodic, Dirichlet, or Neumann). This is
+    essential for finite difference stencils near the domain boundary.
+
+    For example, for a Dirichlet boundary, the ghost cell value is set such that
+    a linear interpolation to the boundary yields the correct fixed value. This
+    often involves mirroring the interior data.
+
+    Important: For many standard finite difference/volume methods, only one
+    layer of ghost cells (`width=1`) is required. More ghost cells might be
+    needed for higher-order schemes or other applications like CNNs on grids.
+    This implementation does not support more than one ghost cell for Neumann BCs.
 
     Args:
-      u: The GridArray to pad.
-      width: The number of cells to add. If negative, pads the lower boundary;
-             if positive, pads the upper boundary.
+      u: The `GridArray` object to pad.
+      width: The number of cells to add. If negative, pads the lower boundary
+        (e.g., left side); if positive, pads the upper boundary (e.g., right side).
       axis: The axis along which to pad.
 
     Returns:
-      A new, padded GridArray.
+      A new, padded `GridArray`.
     """
 
-    # Helper to determine padding configuration based on width and axis.
-    def make_padding(width):
-      if width < 0:  # Pad the lower boundary (e.g., left side)
+    def make_padding(width: int):
+      """
+      A nested helper function to create the padding configuration tuple
+      that `jnp.pad` expects.
+      """
+      # Determine if we are padding the lower or upper boundary based on the sign of `width`.
+      if width < 0:  # pad lower boundary
+        # Get the BC type for the lower boundary of the specified axis.
         bc_type = self.types[axis][0]
+        # `jnp.pad` expects a tuple of (pad_before, pad_after).
         padding = (-width, 0)
-      else:  # Pad the upper boundary (e.g., right side)
+      else:  # pad upper boundary
+        # Get the BC type for the upper boundary.
         bc_type = self.types[axis][1]
         padding = (0, width)
-      
-      # jnp.pad expects a padding configuration for all dimensions.
+
+      # Create the full padding configuration for all dimensions.
+      # It will be `(0, 0)` for all axes except the one being padded.
       full_padding = [(0, 0)] * u.grid.ndim
       full_padding[axis] = padding
       return full_padding, padding, bc_type
 
+    # Call the helper to get the padding configuration.
     full_padding, padding, bc_type = make_padding(width)
+    
+    # Calculate the new offset of the padded array. If we pad `N` cells on the
+    # left (lower boundary), the new array's first element corresponds to an
+    # offset that is `N` units smaller.
     offset = list(u.offset)
-    offset[axis] -= padding[0] # Update the array's offset to reflect the new padded data.
-
-    # Neumann padding is typically only defined for one layer of ghost cells.
+    offset[axis] -= padding[0]
+    
+    # Enforce the limitation that Neumann BC padding is only implemented for a single ghost cell.
+    # Periodic and Dirichlet have more general implementations.
     if not (bc_type == BCType.PERIODIC or
             bc_type == BCType.DIRICHLET) and abs(width) > 1:
       raise ValueError(
           f'Padding past 1 ghost cell is not defined in {bc_type} case.')
 
-    # Trim any existing padding before applying new padding to avoid compounding.
+    # Trim any existing padding from the input array `u`. This is crucial to
+    # prevent padding from accumulating if `_pad` is called multiple times.
+    # `_trim_padding` returns the trimmed array and the amount that was trimmed.
     u, trimmed_padding = self._trim_padding(u)
+    # Get the raw data array from the (potentially trimmed) GridArray.
     data = u.data
-    # Adjust the final padding amount based on what was trimmed.
+    # Update the padding amount needed. If `_trim_padding` removed some existing
+    # padding, we need to add it back to achieve the correct final shape.
     full_padding[axis] = tuple(
         pad + trimmed_pad
         for pad, trimmed_pad in zip(full_padding[axis], trimmed_padding))
 
-    # --- Apply padding based on BC type ---
+    # --- Apply Padding Based on Boundary Condition Type ---
 
     if bc_type == BCType.PERIODIC:
-      # Periodic BCs require the array to cover the full domain dimension.
+      # For periodic boundaries, the data must span the entire grid dimension.
+      # Otherwise, wrapping values around doesn't make physical sense.
       if u.grid.shape[axis] > u.shape[axis]:
-        raise ValueError('the GridArray shape does not match the grid.')
-      # 'wrap' mode implements periodic padding by taking values from the other side.
-      data = jnp.pad(data, full_padding, mode='wrap')
+        raise ValueError('For periodic BC, the GridArray shape must match the grid shape.')
+      # Use `mode='wrap'` which takes values from the opposite end of the array
+      # to fill the padded region, creating the periodic effect.
+      pad_kwargs = dict(mode='wrap')
+      data = jnp.pad(data, full_padding, **pad_kwargs)
 
     elif bc_type == BCType.DIRICHLET:
-      # Logic for cell-centered data (offset ends in .5)
-      if np.isclose(u.offset[axis] % 1, 0.5):
-        if u.grid.shape[axis] > u.shape[axis]:
-          raise ValueError('the GridArray shape does not match the grid.')
-        # This formula ensures that a linear interpolation to the boundary
-        # results in the desired boundary value.
-        data = (2 * jnp.pad(
-            data, full_padding, mode='constant', constant_values=self.bc_values)
-                - jnp.pad(data, full_padding, mode='symmetric'))
-      
-      # Logic for cell-face data (staggered grid, offset ends in .0)
-      elif np.isclose(u.offset[axis] % 1, 0):
-        if u.grid.shape[axis] > u.shape[axis] + 1:
-          raise ValueError('For a dirichlet cell-face boundary condition, ' +
-                           'the GridArray has more than 1 grid point missing.')
-        elif u.grid.shape[axis] == u.shape[axis] + 1 and not np.isclose(
-            u.offset[axis], 1):
-          raise ValueError('For a dirichlet cell-face boundary condition, ' +
-                           'the GridArray has more than 1 grid point missing.')
+      # Dirichlet BCs specify a fixed value *at the boundary*. The implementation
+      # differs depending on whether the data is at cell centers or cell faces.
 
-        # Determines if we need to explicitly pad with the boundary value itself.
+      # Case 1: Data is at cell centers (offset ends in .5).
+      if np.isclose(u.offset[axis] % 1, 0.5):
+        # For Dirichlet at cell centers, the data must also span the full grid.
+        if u.grid.shape[axis] > u.shape[axis]:
+          raise ValueError('For cell-centered Dirichlet, the GridArray shape must match the grid shape.')
+        # This formula sets the ghost cell value `u_ghost` such that a linear
+        # interpolation between `u_ghost` and the first interior cell `u_interior`
+        # equals the boundary value `u_bc`. The formula is: `u_ghost = 2*u_bc - u_interior`.
+        # This is implemented by combining `mode='constant'` (for the `2*u_bc` part)
+        # and `mode='symmetric'` (for the `-u_interior` part).
+        data = (2 * jnp.pad(
+            data, full_padding, mode='constant', constant_values=self.bc_values[axis][padding[1]>0])
+                - jnp.pad(data, full_padding, mode='symmetric'))
+                
+      # Case 2: Data is at cell faces/edges (offset is integer).
+      elif np.isclose(u.offset[axis] % 1, 0):
+        # On a staggered grid, face-aligned data might not include the boundary
+        # face itself (e.g., `u_x` velocity might start at face `i=1/2`, not `i=0`).
+        # This logic handles cases where the boundary value needs to be explicitly added.
+        if u.grid.shape[axis] > u.shape[axis] + 1:
+          raise ValueError('For a Dirichlet cell-face BC, the GridArray is missing too many grid points.')
+        elif u.grid.shape[axis] == u.shape[axis] + 1 and not np.isclose(u.offset[axis], 1):
+          raise ValueError('A GridArray missing a point must be offset by 1 for Dirichlet BC.')
+
+        # Helper to determine if we need to explicitly pad with the boundary value.
         def _needs_pad_with_boundary_value():
-          if (np.isclose(u.offset[axis], 0) and
-              width > 0) or (np.isclose(u.offset[axis], 1) and width < 0):
+          # Case A: We are padding "into" the domain from a face-aligned array
+          # (e.g., offset=0, padding on the right/upper side).
+          if (np.isclose(u.offset[axis], 0) and width > 0) or \
+             (np.isclose(u.offset[axis], 1) and width < 0):
             return True
+          # Case B: The array is one point smaller than the grid, meaning it's an
+          # interior array that's missing the boundary point.
           elif u.grid.shape[axis] == u.shape[axis] + 1:
             return True
           else:
             return False
 
         if _needs_pad_with_boundary_value():
-          # For a single ghost cell, pad with the constant boundary value.
+          # If we need to add the boundary value and are only padding one cell,
+          # we can simply pad with the constant boundary value.
           if np.isclose(abs(width), 1):
             data = jnp.pad(
                 data,
                 full_padding,
                 mode='constant',
-                constant_values=self.bc_values)
-          # For more than one ghost cell, the logic becomes more complex.
+                constant_values=self.bc_values[axis][padding[1]>0])
+          # Padding more than one ghost cell is a more complex reflection.
           elif abs(width) > 1:
-            bc_padding, _, _ = make_padding(int(width / abs(width)))
-            full_padding_past_bc, _, _ = make_padding(
-                (abs(width) - 1) * int(width / abs(width)))
-            expanded_data = jnp.pad(
-                data, bc_padding, mode='constant', constant_values=(0, 0))
-            padding_values = list(self.bc_values)
-            padding_values[axis] = [pad / 2 for pad in padding_values[axis]]
-            data = 2 * jnp.pad(
-                data,
-                full_padding,
-                mode='constant',
-                constant_values=tuple(padding_values)) - jnp.pad(
-                    expanded_data, full_padding_past_bc, mode='reflect')
+            # This logic reflects the data around the explicitly added boundary value.
+            bc_padding, _, _ = make_padding(int(np.sign(width)))
+            full_padding_past_bc, _, _ = make_padding(width - int(np.sign(width)))
+            expanded_data = jnp.pad(data, bc_padding, mode='constant', constant_values=self.bc_values[axis][padding[1]>0])
+            data = jnp.pad(expanded_data, full_padding_past_bc, mode='reflect')
         else:
-          # If the boundary value is already part of the array, use reflection.
+          # If the array already contains the boundary value, we use a different
+          # reflection formula similar to the cell-centered case.
           padding_values = list(self.bc_values)
           padding_values[axis] = [pad / 2 for pad in padding_values[axis]]
           data = 2 * jnp.pad(
@@ -296,30 +362,58 @@ class ConstantBoundaryConditions(BoundaryConditions):
               constant_values=tuple(padding_values)) - jnp.pad(
                   data, full_padding, mode='reflect')
       else:
+        # The offset must be either a center or a face.
         raise ValueError('expected offset to be an edge or cell center, got '
                          f'offset[axis]={u.offset[axis]}')
-    
     elif bc_type == BCType.NEUMANN:
-      # Neumann BCs also require the full grid dimension.
+      # Neumann boundary conditions specify the gradient at the boundary.
+      # Similar to periodic and cell-centered Dirichlet, the array must span
+      # the full grid dimension for the stencil math to be well-defined.
       if u.grid.shape[axis] > u.shape[axis]:
-        raise ValueError('the GridArray shape does not match the grid.')
+        raise ValueError('For Neumann BC, the GridArray shape must match the grid shape.')
+        
+      # The implementation is valid for data at cell centers or cell faces.
       if not (np.isclose(u.offset[axis] % 1, 0) or
               np.isclose(u.offset[axis] % 1, 0.5)):
-        raise ValueError('expected offset to be an edge or cell center, got '
+        raise ValueError('Expected offset to be an edge or cell center for Neumann BC, got '
                          f'offset[axis]={u.offset[axis]}')
       else:
-        # This formula sets the ghost cell value such that the finite difference
-        # approximation of the gradient at the boundary equals the Neumann value.
+        # This formula sets the ghost cell value `u_ghost` such that the finite
+        # difference approximation of the gradient at the boundary equals the
+        # specified Neumann value, `N`.
+        #
+        # For a forward difference at the lower boundary: (u_interior_1 - u_ghost) / dx = N
+        # Rearranging gives: u_ghost = u_interior_1 - N * dx.
+        # For a backward difference at the upper boundary: (u_ghost - u_interior_last) / dx = N
+        # Rearranging gives: u_ghost = u_interior_last + N * dx.
+        #
+        # This single line of code cleverly implements both cases:
         data = (
-            jnp.pad(data, full_padding, mode='edge') + u.grid.step[axis] *
+            # `jnp.pad(..., mode='edge')` sets `u_ghost = u_interior`. This is the
+            # zero-Neumann part of the formula (`u_interior_1`).
+            jnp.pad(data, full_padding, mode='edge')
+            
+            # The second part is the correction `± N * dx`.
+            + u.grid.step[axis] *
+            
+            # This difference term `(0 - N)` provides the `±N` part.
+            # `jnp.pad(..., mode='constant')` pads with 0 by default.
+            # `jnp.pad(..., constant_values=...)` pads with the Neumann value `N`.
+            # The result is `(0 - N)` on the lower boundary and `(N - 0)` on the
+            # upper boundary (after considering padding directions), which correctly
+            # applies the `±` sign.
             (jnp.pad(data, full_padding, mode='constant') - jnp.pad(
                 data,
                 full_padding,
                 mode='constant',
-                constant_values=self.bc_values)))
+                constant_values=self.bc_values[axis][padding[1]>0]))
+        )
     else:
-      raise ValueError('invalid boundary type')
+      # If the `bc_type` is not one of the recognized types, raise an error.
+      raise ValueError(f'Invalid boundary type encountered: {bc_type}')
 
+    # After computing the padded `data` array according to the correct BC logic,
+    # wrap it in a new GridArray with the updated offset and grid information.
     return GridArray(data, tuple(offset), u.grid)
 
   def _trim(
@@ -329,520 +423,1040 @@ class ConstantBoundaryConditions(BoundaryConditions):
       axis: int,
   ) -> GridArray:
     """
-    Trims cells from the boundary of a GridArray. This is the inverse of _pad.
+    Trims a specified number of cells from the boundary of a GridArray.
+    This is the inverse operation of `_pad`.
 
     Args:
-      u: The GridArray to trim.
-      width: The number of cells to trim. If negative, trims the lower boundary;
-             if positive, trims the upper boundary.
+      u: a `GridArray` object to be trimmed.
+      width: The number of cells to trim. If negative, trims from the lower
+        boundary (e.g., left side). If positive, trims from the upper boundary
+        (e.g., right side).
+      axis: The axis along which to perform the trim.
+
+    Returns:
+      A new, smaller `GridArray`.
+    """
+    # Determine the slice indices based on the sign of `width`.
+    if width < 0:  # Trim from the lower boundary.
+      # `padding` here represents the slice start and end relative to the edges.
+      # A width of -2 means we want to slice from index 2 onwards.
+      padding = (-width, 0)
+    else:  # Trim from the upper boundary.
+      # A width of 2 means we want to slice up to the last 2 elements.
+      padding = (0, width)
+
+    # Calculate the slice indices for the `lax.slice_in_dim` function.
+    # The start index is `padding[0]`.
+    # The limit index is the total size minus the amount to trim from the end.
+    limit_index = u.data.shape[axis] - padding[1]
+    
+    # `lax.slice_in_dim` is the JAX primitive for slicing an array along a
+    # single dimension. It is more efficient inside a `jit` context than
+    # standard Python slicing `array[...]`.
+    data = lax.slice_in_dim(u.data, padding[0], limit_index, axis=axis)
+    
+    # Update the offset to reflect the trim. If we trim `N` cells from the
+    # left (lower boundary), the new array's first element corresponds to an
+    # offset that is `N` units larger.
+    offset = list(u.offset)
+    offset[axis] += padding[0]
+    
+    # Return a new GridArray with the trimmed data and updated offset.
+    return GridArray(data, tuple(offset), u.grid)
+
+  def _trim_padding(self, u: grids.GridArray, axis: int = 0):
+    """
+    Trims all excess ghost cell padding from a GridArray to make its shape
+    match the underlying grid's shape.
+
+    This is a utility function used to normalize a `GridArray` that may have
+    been padded in previous operations, ensuring it represents only the data
+    within the physical domain before a new operation is applied.
+
+    Args:
+      u: a `GridArray` object that may have padding.
       axis: The axis along which to trim.
 
     Returns:
-      A new, trimmed GridArray.
+      A tuple containing:
+      - The trimmed `GridArray`, whose shape now matches `u.grid.shape`.
+      - A `padding` tuple `(trimmed_from_left, trimmed_from_right)` indicating
+        how many cells were removed from each side.
     """
-    if width < 0: # Trim from the lower boundary
-      padding = (-width, 0)
-    else: # Trim from the upper boundary
-      padding = (0, width)
-    
-    # Calculate the slice indices.
-    limit_index = u.data.shape[axis] - padding[1]
-    # Use lax.slice_in_dim for JAX-compatible slicing.
-    data = lax.slice_in_dim(u.data, padding[0], limit_index, axis=axis)
-    # Update offset to reflect the trimmed data.
-    offset = list(u.offset)
-    offset[axis] += padding[0]
-    return GridArray(data, tuple(offset), u.grid)
-
-  def _trim_padding(self, u: grids.GridArray, axis=0):
-    """
-    Trims all excess padding from a GridArray to make it match the grid shape.
-
-    Args:
-      u: The potentially padded GridArray.
-      axis: The axis to trim.
-
-    Returns:
-      A tuple containing the trimmed GridArray and the amounts that were trimmed.
-    """
+    # `padding` will store the number of cells trimmed from the (lower, upper) sides.
     padding = (0, 0)
-    # If the array is larger than the grid, it has padding.
+    
+    # Only perform trimming if the array's shape is larger than the grid's shape.
     if u.shape[axis] > u.grid.shape[axis]:
+      # `negative_trim` stores the number of cells padded on the left/lower side.
       negative_trim = 0
+      # A negative offset indicates that padding exists on the left side.
       if u.offset[axis] < 0:
-        # Calculate and trim padding on the negative/lower side.
+        # The number of padded cells is the absolute value of the offset, rounded.
         negative_trim = -round(-u.offset[axis])
+        # Trim these cells from the lower boundary.
         u = self._trim(u, negative_trim, axis)
-      # Calculate and trim any remaining padding on the positive/upper side.
+        
+      # `positive_trim` is the remaining excess size after the left-side trim.
+      # This corresponds to the padding on the right/upper side.
       positive_trim = u.shape[axis] - u.grid.shape[axis]
       if positive_trim > 0:
+        # Trim these cells from the upper boundary.
         u = self._trim(u, positive_trim, axis)
+        
+      # Record the total number of cells trimmed from each side.
       padding = (negative_trim, positive_trim)
+      
+    # Return the fully trimmed array and the record of what was trimmed.
     return u, padding
 
   def values(
       self, axis: int,
-      grid: grids.Grid) -> Tuple[Optional[jnp.ndarray], Optional[jnp.ndarray]]:
-    """Returns the boundary values as arrays broadcastable to the grid faces."""
+      grid: grids.Grid
+  ) -> Tuple[Optional[jnp.ndarray], Optional[jnp.ndarray]]:
+    """
+    Returns the boundary values as arrays broadcastable to the grid faces.
+
+    This method takes the scalar boundary condition values (e.g., `1.0` for a
+    wall moving at a speed of 1) and converts them into JAX arrays that have the
+    same shape as the boundary face of the grid. This is useful for applying
+    boundary conditions in solvers.
+
+    Args:
+      axis: The axis along which to return boundary values.
+      grid: A `Grid` object on which the boundary conditions are to be evaluated.
+
+    Returns:
+      A tuple containing two elements: `(lower_boundary_array, upper_boundary_array)`.
+      Each element is a JAX array with `grid.ndim - 1` dimensions, filled with
+      the corresponding boundary value. In the case of periodic boundaries,
+      where a single value is not well-defined, it returns `(None, None)`.
+    """
+    # For periodic boundaries, the `bc_values` are typically set to `None`.
+    # In this case, there are no specific values to return.
     if None in self.bc_values[axis]:
-      # Periodic boundaries don't have a single "value", so return None.
       return (None, None)
-    # Create arrays of the boundary values with shapes matching the grid boundary face.
-    bc_values = tuple(
-        jnp.full(grid.shape[:axis] +
-                 grid.shape[axis + 1:], self.bc_values[axis][-i])
-        for i in [0, 1])
-    return bc_values
+      
+    # Create the shape of the boundary face. For a 3D grid and `axis=1` (y-axis),
+    # the face shape would be `(shape[0], shape[2])`.
+    face_shape = grid.shape[:axis] + grid.shape[axis + 1:]
+    
+    # Create JAX arrays for the lower and upper boundaries, filled with the
+    # respective scalar values from `self.bc_values`.
+    # `self.bc_values[axis][-i]` with `i=0` and `i=1` is a way to access
+    # the (upper, lower) values in reverse order.
+    bc_value_arrays = tuple(
+        jnp.full(face_shape, self.bc_values[axis][i])
+        for i in [0, 1]) # i=0 for lower, i=1 for upper
+        
+    return bc_value_arrays
 
   def trim_boundary(self, u: grids.GridArray) -> grids.GridArray:
     """
-    Returns a GridArray with boundary points removed.
+    Returns a `GridArray` containing only the interior data points.
 
-    For Dirichlet conditions on a staggered grid, a value might lie directly on
-    the boundary. This function removes such points, returning only the
-    interior values.
+    This method performs two trimming operations:
+    1. It removes any ghost cell padding that might exist on the input `u`,
+       making its shape equal to the grid's shape.
+    2. For Dirichlet boundary conditions on a staggered grid, it removes the
+       grid points that lie exactly on the boundary, as these are considered
+       boundary values, not interior unknowns.
 
     Args:
-      u: A GridArray that may include boundary points.
+      u: A `GridArray` object that may have padding or include points on the boundary.
 
     Returns:
-      A GridArray containing only interior data points.
+      A new, potentially smaller `GridArray` containing only interior data points.
     """
-    # First, remove any ghost cell padding.
+    # Step 1: Remove any ghost cell padding from all axes.
+    # The `_` is used to discard the second return value of `_trim_padding`.
     for axis in range(u.grid.ndim):
-      u, _ = self._trim_padding(u, axis)
+      u, _ = self._trim_padding(u, axis=axis)
+      
+    # After trimming padding, the array shape should match the grid shape.
+    # If not, it implies the array was already trimmed, which is an invalid state.
     if u.shape != u.grid.shape:
-      raise ValueError('the GridArray has already been trimmed.')
-    # Next, trim points that lie exactly on a Dirichlet boundary.
+      raise ValueError('The GridArray shape does not match the grid shape after trimming padding.')
+      
+    # Step 2: Trim points that lie exactly on a Dirichlet boundary.
     for axis in range(u.grid.ndim):
-      # Trim lower boundary if it's Dirichlet and offset is 0.
-      if np.isclose(u.offset[axis],
-                    0.0) and self.types[axis][0] == BCType.DIRICHLET:
+      # Check for a Dirichlet condition on the lower boundary. If the data is
+      # located at an offset of 0.0, it lies on the boundary and should be trimmed.
+      if np.isclose(u.offset[axis], 0.0) and self.types[axis][0] == BCType.DIRICHLET:
+        # Trim one layer from the lower boundary.
         u = self._trim(u, -1, axis)
-      # Trim upper boundary if it's Dirichlet and offset is 1.
-      elif np.isclose(u.offset[axis],
-                      1.0) and self.types[axis][1] == BCType.DIRICHLET:
+        
+      # Check for a Dirichlet condition on the upper boundary. If the data is
+      # located at an offset of 1.0 (relative to the cell size), it lies on the
+      # boundary and should be trimmed.
+      elif np.isclose(u.offset[axis], 1.0) and self.types[axis][1] == BCType.DIRICHLET:
+        # Trim one layer from the upper boundary.
         u = self._trim(u, 1, axis)
+        
+    # Return the fully trimmed GridArray.
     return u
 
   def pad_and_impose_bc(
       self,
       u: grids.GridArray,
-      offset_to_pad_to: Optional[Tuple[float,
-                                       ...]] = None) -> grids.GridVariable:
-    """Pads an interior-only GridArray and wraps it in a GridVariable."""
+      offset_to_pad_to: Optional[Tuple[float, ...]] = None
+  ) -> grids.GridVariable:
+    """
+    Pads an interior-only `GridArray` and wraps it in a `GridVariable`.
+
+    This method is designed to take a `GridArray` that only contains data for
+    the interior computational nodes and add the necessary boundary points,
+    turning it into a complete `GridVariable` that is consistent with its
+    boundary conditions.
+
+    Args:
+      u: A `GridArray` object that specifies values only on the internal nodes.
+      offset_to_pad_to: A tuple specifying the desired final offset. This is
+        important for ambiguous cases on staggered grids; for example, an interior
+        array for a Dirichlet problem could be padded to align with either the
+        lower or upper boundary face.
+
+    Returns:
+      A `GridVariable` that has been correctly padded to include boundary points.
+    """
+    # If no target offset is specified, assume the final offset is the same as the input.
     if offset_to_pad_to is None:
       offset_to_pad_to = u.offset
-    # Special handling for Dirichlet boundaries on staggered grids.
+      
+    # This loop handles a specific, tricky case for staggered grids with Dirichlet BCs.
+    # If the interior data `u` is offset by 1.0 (i.e., it starts one grid cell in),
+    # it needs to be padded on one side or the other to include the boundary face.
     for axis in range(u.grid.ndim):
-      if self.types[axis][0] == BCType.DIRICHLET and np.isclose(
-          u.offset[axis], 1.0):
+      # Check if the BC is Dirichlet and the interior data starts at an offset of 1.0.
+      if self.types[axis][0] == BCType.DIRICHLET and np.isclose(u.offset[axis], 1.0):
+        # If the target is also offset by 1.0, pad one cell to the right (upper boundary).
         if np.isclose(offset_to_pad_to[axis], 1.0):
           u = self._pad(u, 1, axis)
+        # If the target is offset by 0.0, pad one cell to the left (lower boundary).
         elif np.isclose(offset_to_pad_to[axis], 0.0):
           u = self._pad(u, -1, axis)
-    # Return a GridVariable, which pairs the data array with its BC object.
+          
+    # After padding, wrap the resulting `GridArray` and `self` (the BC object)
+    # into a new, complete `GridVariable`.
     return grids.GridVariable(u, self)
 
   def impose_bc(self, u: grids.GridArray) -> grids.GridVariable:
     """
-    Ensures a GridArray is consistent with the boundary conditions.
+    Ensures a `GridArray` is consistent with the boundary conditions.
 
-    This is a convenience method that first trims any boundary values from the
-    input array and then pads it correctly, returning a complete GridVariable.
+    This is a high-level convenience method that handles the common workflow of
+    taking a `GridArray` that might have points on the boundary, trimming it down
+    to just the interior points, and then correctly padding it back to create
+    a final, consistent `GridVariable`.
+
+    Args:
+      u: A `GridArray` object.
+
+    Returns:
+      A `GridVariable` that has the correct boundary values imposed.
     """
+    # Store the original offset of the input array.
     offset = u.offset
-    # If the array already has the shape of the grid, it might contain
-    # points on the boundary that need to be trimmed first.
+    
+    # If the input array's shape matches the grid's shape, it might contain
+    # points that lie exactly on a boundary. These must be trimmed first to
+    # isolate the true interior "unknowns" of the system.
     if u.shape == u.grid.shape:
       u = self.trim_boundary(u)
+      
+    # After ensuring `u` contains only interior points, call `pad_and_impose_bc`
+    # to add the correct boundary values back on.
     return self.pad_and_impose_bc(u, offset)
 
-  # Alias common methods for convenience.
+  # Create convenient aliases for the private `_trim` and `_pad` methods.
+  # This allows them to be called from outside the class if needed, for example,
+  # `my_bc_object.pad(...)` instead of `my_bc_object._pad(...)`.
   trim = _trim
   pad = _pad
 
-
+# This decorator registers the class with JAX, allowing it to be used as a node in a PyTree.
 @register_pytree_node_class
 class HomogeneousBoundaryConditions(ConstantBoundaryConditions):
   """
-  A specialized, more efficient BC class for homogeneous conditions.
+  A specialized, more efficient `BoundaryConditions` class for homogeneous conditions.
   
-  This represents boundaries where the value (Dirichlet) or flux (Neumann) is
-  zero. By overriding the PyTree flattening, we can tell JAX that the values
-  and timestamp are truly constant and not dynamic, leading to better optimization.
+  This class represents boundary conditions where the value (for Dirichlet) or
+  the flux (for Neumann) is zero everywhere. This is a very common case in CFD
+  (e.g., a stationary no-slip wall has a velocity of zero).
+
+  This class inherits from `ConstantBoundaryConditions` but provides a more
+  optimized `tree_flatten` method. By telling JAX that the boundary values are
+  always constant and known (zero), it allows for better optimization in
+  compiled functions, as these values do not need to be tracked as dynamic tracers.
+
+  Attributes:
+    types: `types[i]` is a tuple specifying the lower and upper BC types for
+      dimension `i`.
   """
 
   def __init__(self, types: Sequence[Tuple[str, str]]):
     """
-    Initializes homogeneous boundary conditions.
+    Initializes homogeneous boundary conditions for the given types.
     
     Args:
-      types: A sequence of tuples specifying the boundary types for each dimension.
+      types: A sequence of tuples specifying the boundary types for each
+        dimension, e.g., `((BCType.PERIODIC, BCType.PERIODIC), (BCType.DIRICHLET, BCType.DIRICHLET))`.
     """
+    # Get the number of dimensions from the length of the `types` sequence.
     ndim = len(types)
-    # Values are always (0.0, 0.0) for homogeneous conditions.
+    # The boundary values are always zero for homogeneous conditions.
     values = ((0.0, 0.0),) * ndim
-    # A placeholder boundary function.
+    # A placeholder boundary function is used, as it's not time-dependent.
     bc_fn = lambda x: x
-    # Timestamp is irrelevant, so set to 0.0.
+    # The timestamp is irrelevant for non-time-dependent BCs, so it's set to a constant.
     time_stamp = 0.0
-    # Initialize the parent class with these constant values.
+    # Call the parent class's initializer with these fixed, homogeneous values.
     super(HomogeneousBoundaryConditions, self).__init__(time_stamp, values, types, bc_fn)
 
   def tree_flatten(self):
     """
-    Custom flattening recipe for efficiency.
+    Provides a custom, optimized flattening recipe for this class.
     
-    Since all values are constant and known, there are no dynamic "children".
-    Everything is static "aux_data". This prevents JAX from tracking these
-    values as dynamic tracers inside compiled functions.
+    Since all numerical values (`bc_values`, `time_stamp`) are constant and
+    known, there are no dynamic "children" that JAX needs to trace. Everything
+    is treated as static "auxiliary data". This is a key optimization.
     """
     children = ()  # No dynamic children.
-    aux_data = (self.types,) # Only the `types` tuple is needed to reconstruct.
+    aux_data = (self.types,) # Only the `types` tuple is needed to reconstruct the object.
     return children, aux_data
 
   @classmethod
   def tree_unflatten(cls, aux_data, children):
-    """Reconstructs the object from its static-only data."""
-    # The class is reconstructed using only the `types` from aux_data.
+    """Reconstructs the object from its static-only auxiliary data."""
+    # The class is reconstructed using only the `types` from `aux_data`.
     return cls(*aux_data)
 
 
 @register_pytree_node_class
 class TimeDependentBoundaryConditions(ConstantBoundaryConditions):
   """
-  Boundary conditions that can vary with time.
+  DEPRECATED / REDUNDANT CLASS for boundary conditions that can vary with time.
   
-  Note: The current implementation has some inconsistencies in argument order
-  between `__init__` and `tree_unflatten` which may need correction. This
-  class is less used since the `update_BC` logic was simplified.
+  The functionality of this class is already fully covered by the main
+  `ConstantBoundaryConditions` class, which includes a `boundary_fn` and a
+  `time_stamp` attribute for handling time-dependent cases. This subclass does
+  not add any new functionality and has some potential inconsistencies (like
+  the argument order in `__init__`). It is likely a remnant of an earlier
+  design and could probably be removed.
+  
+  The docstring and example usage are also misleading as they are copied from
+  a different class.
   """
 
-  def __init__(self, types: Sequence[Tuple[str, str]],values: Sequence[Tuple[Optional[float], Optional[float]]],boundary_fn: Callable[..., Optional[float]],time_stamp: Optional[float]):
-    # The argument order here (`types`, `values`, ...) differs from the parent `__init__`.
-    # This may cause issues if called directly.
-    super(TimeDependentBoundaryConditions, self).__init__(types, values,boundary_fn,time_stamp)
+  def __init__(
+      self,
+      types: Sequence[Tuple[str, str]],
+      values: Sequence[Tuple[Optional[float], Optional[float]]],
+      boundary_fn: Callable[..., Optional[float]],
+      time_stamp: Optional[float]
+  ):
+    # Note: The argument order here (`types`, `values`, ...) differs from the
+    # parent `ConstantBoundaryConditions`'s `__init__` signature. This could
+    # cause issues if `tree_unflatten` from the parent were ever used.
+    
+    # The commented out lines are likely remnants of a previous implementation.
+    #ndim = len(types)
+    #values = ((0.0, 0.0),) * ndim
+    
+    # Call the parent class's initializer.
+    super(TimeDependentBoundaryConditions, self).__init__(time_stamp, values, types, boundary_fn)
 
   def tree_flatten(self):
-    """Returns flattening recipe for JAX PyTree."""
-    # Here, bc_values are considered dynamic children.
+    """
+    Returns a flattening recipe for this JAX PyTree.
+    This recipe differs from the parent class, which might be intentional or
+    an artifact of an older design. Here, only `bc_values` are considered dynamic.
+    """
+    # The boundary values are the dynamic part.
     children = (self.bc_values,)
-    # Timestamp, types, and the function are static auxiliary data.
+    # The timestamp, types, and function are considered static.
     aux_data = (self.time_stamp, self.types, self.boundary_fn,)
     return children, aux_data
 
   @classmethod
   def tree_unflatten(cls, aux_data, children):
-    """Returns unflattening recipe for JAX PyTree."""
-    # Reconstructs using children and aux_data. Note the potential argument order mismatch.
+    """
+    Returns the unflattening recipe for this JAX PyTree.
+    It reconstructs the object from its flattened parts.
+    """
+    # Note: The argument order `(*children, *aux_data)` might not match the
+    # `__init__` signature, which could lead to errors.
     return cls(*children, *aux_data)
 
 
-def boundary_function(t):
-  """An example of a function defining a time-dependent boundary value."""
-  A=1
+def boundary_function(t: float) -> jnp.ndarray:
+  """
+  An example of a function defining a time-dependent boundary value.
+  
+  This function can be passed into a `ConstantBoundaryConditions` object via the
+  `boundary_fn` attribute to create time-varying Dirichlet or Neumann conditions.
+  The `update_BC` function would then call this function at each time step to
+  get the new boundary values.
+
+  Note: The current implementation `1 + 0 * (...)` will always return `1.0`.
+  This is likely a placeholder or was simplified for debugging. A typical
+  implementation would be `A*jnp.cos(freq*t) + B*jnp.sin(freq*t)`.
+
+  Args:
+    t: The current simulation time.
+
+  Returns:
+    The value of the boundary condition at time `t`.
+  """
+  # Define some parameters for the sinusoidal function.
+  A = 1
   B = 1
   freq = 1
-  # A simple sinusoidal function of time `t`.
-  return 1+0*(A*jnp.cos(freq*t)+B*jnp.sin(freq*t))
+  # Calculate the time-dependent value. The `1 + 0 *` makes it always return 1.
+  return 1 + 0 * (A * jnp.cos(freq*t) + B * jnp.sin(freq*t))    
 
-# --- MODIFIED FUNCTIONS TO FIX THE BUGS ---
-
-def Reserve_BC(all_variable: particle_class.All_Variables, step_time: float) -> particle_class.All_Variables:
+def Reserve_BC(
+    all_variable: particle_class.All_Variables,
+    step_time: float
+) -> particle_class.All_Variables:
     """
-    Pass-through function. Obsolete for static BCs in the deformable model.
+    Updates the boundary conditions for the velocity field based on their `boundary_fn`.
     
-    This function was previously used to handle complex, time-dependent boundary
-    conditions. It has been replaced by this simple pass-through because the
-    current simulation setups (e.g., with static or periodic boundaries) do
-    not require dynamic updates to BC values during the simulation loop.
-    This simplifies the code and avoids potential bugs.
+    NOTE: In the refactored new code, this function and `update_BC` have been
+    replaced by simple pass-through functions, making this implementation effectively
+    obsolete for the main dynamic solver. It is kept here for context.
+
+    This function's name is slightly misleading; it appears to be a specific type
+    of BC update, perhaps for resetting or "reserving" certain values while
+    updating others. It constructs new `ConstantBoundaryConditions` objects for
+    the velocity field with updated `bc_values` and `time_stamp`.
+
+    Args:
+      all_variable: The complete current state of the simulation.
+      step_time: The time step size, `dt`.
+
+    Returns:
+      A new `All_Variables` object with updated boundary conditions for the velocity.
     """
-    return all_variable
-
-def update_BC(all_variable: particle_class.All_Variables, step_time: float) -> particle_class.All_Variables:
+    # Unpack the current simulation state.
+    v = all_variable.velocity
+    particles = all_variable.particles
+    pressure = all_variable.pressure
+    Drag = all_variable.Drag
+    Step_count = all_variable.Step_count
+    MD_var = all_variable.MD_var
+    
+    # Get the boundary function objects for each velocity component.
+    bcfn_x = v[0].bc.boundary_fn
+    bcfn_y = v[1].bc.boundary_fn
+    
+    # Update the time stamp.
+    dt = step_time
+    ts = v[0].bc.time_stamp + dt
+    
+    # Calculate the new boundary values by calling the boundary functions.
+    # Note the mix of dynamic and static values: `(bcfn[0](ts), bcfn[1](0.0))` suggests
+    # some boundary values are updated with the new time, while others are held constant.
+    vx_bc = ((bcfn_x[0](ts), bcfn_x[1](0.0)), (bcfn_x[2](ts), bcfn_x[3](0.0)))
+    vy_bc = ((bcfn_y[0](ts), bcfn_y[1](0.0)), (bcfn_y[2](ts), bcfn_y[3](0.0)))
+    
+    # Create new `ConstantBoundaryConditions` objects with the updated values.
+    vel_bc = (ConstantBoundaryConditions(values=vx_bc, time_stamp=ts, types=v[0].bc.types, boundary_fn=bcfn_x),
+              ConstantBoundaryConditions(values=vy_bc, time_stamp=ts, types=v[1].bc.types, boundary_fn=bcfn_y))
+   
+    # Create new `GridVariable` objects for the velocity components, pairing the
+    # original data arrays with the new boundary condition objects.
+    v_updated =  tuple(grids.GridVariable(u.array, bc) for u, bc in zip(v, vel_bc))
+    
+    # Return a new `All_Variables` object containing the updated velocity variables.
+    return particle_class.All_Variables(particles, v_updated, pressure, Drag, Step_count, MD_var)
+  
+def update_BC(
+    all_variable: particle_class.All_Variables,
+    step_time: float
+) -> particle_class.All_Variables:
     """
-    Pass-through function. The logic for time-dependent BCs is not needed.
+    Updates all time-dependent boundary conditions for the velocity field.
 
-    Similar to `Reserve_BC`, this function is now a placeholder. The original
-    logic for updating boundary conditions based on a `boundary_fn` and `time_stamp`
-    has been removed as it is not needed for the current primary use case of
-    static periodic boundaries.
+    NOTE: This function is also obsolete in the newest version of the code, having
+    been replaced by a simple pass-through.
+
+    This function is similar to `Reserve_BC` but appears to be a more general
+    update where all boundary values are evaluated at the new time stamp `ts`.
+
+    Args:
+      all_variable: The complete current state of the simulation.
+      step_time: The time step size, `dt`.
+
+    Returns:
+      A new `All_Variables` object with updated boundary conditions for the velocity.
     """
-    return all_variable
+    # Unpack the state.
+    v = all_variable.velocity
+    particles = all_variable.particles
+    pressure = all_variable.pressure
+    Drag = all_variable.Drag
+    Step_count = all_variable.Step_count
+    MD_var = all_variable.MD_var
+    
+    # Get the boundary functions.
+    bcfn_x = v[0].bc.boundary_fn
+    bcfn_y = v[1].bc.boundary_fn
+    
+    # Update the time stamp.
+    dt = step_time
+    ts = v[0].bc.time_stamp + dt
+    
+    # Calculate the new boundary values by calling all boundary functions with the new time `ts`.
+    vx_bc = ((bcfn_x[0](ts), bcfn_x[1](ts)), (bcfn_x[2](ts), bcfn_x[3](ts)))
+    vy_bc = ((bcfn_y[0](ts), bcfn_y[1](ts)), (bcfn_y[2](ts), bcfn_y[3](ts)))
+    
+    # Create new BC objects.
+    vel_bc = (ConstantBoundaryConditions(values=vx_bc, time_stamp=ts, types=v[0].bc.types, boundary_fn=bcfn_x),
+              ConstantBoundaryConditions(values=vy_bc, time_stamp=ts, types=v[1].bc.types, boundary_fn=bcfn_y))
+   
+    # Create updated GridVariable objects.
+    v_updated =  tuple(grids.GridVariable(u.array, bc) for u, bc in zip(v, vel_bc))
+    
+    # Return the new state.
+    return particle_class.All_Variables(particles, v_updated, pressure, Drag, Step_count, MD_var)
 
-# --- END MODIFIED FUNCTIONS ---
+# --- Convenience Utilities / Factory Functions ---
+# These functions provide simple, readable ways to create common types of boundary conditions.
 
-def periodic_boundary_conditions(ndim: int) -> ConstantBoundaryConditions:
-  """Factory function to create periodic BCs for a given number of dimensions."""
-  return HomogeneousBoundaryConditions(
-      ((BCType.PERIODIC, BCType.PERIODIC),) * ndim)
+def periodic_boundary_conditions(ndim: int) -> HomogeneousBoundaryConditions:
+  """
+  A factory function that returns periodic boundary conditions for all axes.
+  
+  Args:
+    ndim: The number of spatial dimensions.
+  
+  Returns:
+    A `HomogeneousBoundaryConditions` object configured for periodic BCs.
+  """
+  # Creates a tuple of `ndim` pairs of ('periodic', 'periodic').
+  periodic_types = ((BCType.PERIODIC, BCType.PERIODIC),) * ndim
+  return HomogeneousBoundaryConditions(periodic_types)
+
 
 def Radom_velocity_conditions(ndim: int) -> ConstantBoundaryConditions:
-    """Factory function to create moving wall BCs with initial zero velocity."""
+    """
+    A factory function that returns a specific "Moving Wall" boundary condition
+    with initial zero-valued BCs.
+    
+    The name `Radom_velocity_conditions` is likely a typo and should probably be
+    `Random_velocity_conditions` or something more descriptive like
+    `zero_velocity_moving_wall_bcs`.
+    """
+    # Start with homogeneous (zero) boundary values.
     values = ((0.0, 0.0),) * ndim
-    bc_fn = lambda x: x  # Placeholder function
+    # Use a placeholder, identity boundary function.
+    bc_fn = lambda x: x
+    # Start time is zero.
     time_stamp = 0.0
+    # Call another factory function to construct the final BC object.
     return Moving_wall_boundary_conditions(
-    ndim,
-    bc_vals=values,
-    time_stamp=time_stamp,
-    bc_fn=bc_fn,)
+        ndim,
+        bc_vals=values,
+        time_stamp=time_stamp,    
+        bc_fn=bc_fn,
+    )
+
 
 def dirichlet_boundary_conditions(
     ndim: int,
     bc_vals: Optional[Sequence[Tuple[float, float]]] = None,
 ) -> ConstantBoundaryConditions:
-  """Factory function for Dirichlet BCs."""
+  """
+  A factory function that creates Dirichlet boundary conditions for all axes.
+
+  Args:
+    ndim: The number of spatial dimensions.
+    bc_vals: A sequence of tuples specifying the lower and upper boundary values
+      for each dimension, e.g., `((x_lower, x_upper), (y_lower, y_upper))`.
+      If `None`, it creates homogeneous (zero-valued) Dirichlet BCs.
+
+  Returns:
+    A `ConstantBoundaryConditions` or `HomogeneousBoundaryConditions` instance.
+  """
+  # Define the boundary types for all dimensions as Dirichlet.
+  dirichlet_types = ((BCType.DIRICHLET, BCType.DIRICHLET),) * ndim
+  
+  # If no boundary values are provided, create a more efficient
+  # HomogeneousBoundaryConditions object.
   if not bc_vals:
-    # If no values are provided, create homogeneous (zero-value) Dirichlet BCs.
-    return HomogeneousBoundaryConditions(
-        ((BCType.DIRICHLET, BCType.DIRICHLET),) * ndim)
+    return HomogeneousBoundaryConditions(dirichlet_types)
+  # Otherwise, create a standard ConstantBoundaryConditions object with the given values.
+  # Note: The `__init__` call is incomplete here; it's missing `time_stamp` and `boundary_fn`.
+  # This suggests the class constructor might have default values or this is an older usage pattern.
   else:
-    # Otherwise, create ConstantBoundaryConditions with the specified values.
-    return ConstantBoundaryConditions(
-        ((BCType.DIRICHLET, BCType.DIRICHLET),) * ndim, bc_vals)
+    # A more complete call would look like:
+    # return ConstantBoundaryConditions(time_stamp=0.0, values=bc_vals, types=dirichlet_types, boundary_fn=lambda t: t)
+    return ConstantBoundaryConditions(types=dirichlet_types, values=bc_vals)
+
 
 def neumann_boundary_conditions(
     ndim: int,
     bc_vals: Optional[Sequence[Tuple[float, float]]] = None,
 ) -> ConstantBoundaryConditions:
-  """Factory function for Neumann BCs."""
+  """
+  A factory function that returns Neumann boundary conditions for all axes.
+
+  Args:
+    ndim: The number of spatial dimensions.
+    bc_vals: A sequence of tuples specifying the lower and upper boundary flux
+      values for each dimension. If `None`, it creates homogeneous (zero-flux)
+      Neumann BCs.
+
+  Returns:
+    A `ConstantBoundaryConditions` or `HomogeneousBoundaryConditions` instance.
+  """
+  # Define the boundary types for all dimensions as Neumann.
+  neumann_types = ((BCType.NEUMANN, BCType.NEUMANN),) * ndim
+  
+  # If no flux values are provided, return the optimized homogeneous version.
   if not bc_vals:
-    # If no values provided, create homogeneous (zero-flux) Neumann BCs.
-    return HomogeneousBoundaryConditions(
-        ((BCType.NEUMANN, BCType.NEUMANN),) * ndim)
+    return HomogeneousBoundaryConditions(neumann_types)
+  # Otherwise, create a standard ConstantBoundaryConditions object.
+  # This call is also incomplete, similar to the Dirichlet factory.
   else:
-    # Otherwise, create ConstantBoundaryConditions with the specified flux values.
-    return ConstantBoundaryConditions(
-        ((BCType.NEUMANN, BCType.NEUMANN),) * ndim, bc_vals)
+    return ConstantBoundaryConditions(types=neumann_types, values=bc_vals)
+
 
 def channel_flow_boundary_conditions(
     ndim: int,
     bc_vals: Optional[Sequence[Tuple[float, float]]] = None,
 ) -> ConstantBoundaryConditions:
   """
-  Creates BCs for a typical channel flow setup.
-  
-  This sets the first axis (X) to be periodic and the second axis (Y) to be
-  Dirichlet (solid walls). Any further dimensions are also set to periodic.
+  A factory for creating boundary conditions for a typical channel flow setup.
+
+  This configures the domain to be periodic in the primary flow direction (x-axis)
+  and have solid walls (Dirichlet) in the cross-stream direction (y-axis).
+  Any additional dimensions (e.g., z-axis in a 3D channel) are also set to periodic.
+
+  Args:
+    ndim: The number of spatial dimensions.
+    bc_vals: A sequence of tuples for the boundary values. For the periodic
+      dimensions, the corresponding tuple should be `(None, None)`.
+
+  Returns:
+    A `ConstantBoundaryConditions` or `HomogeneousBoundaryConditions` instance.
   """
+  # Define the BC types for the first two dimensions (periodic, then Dirichlet).
   bc_type = ((BCType.PERIODIC, BCType.PERIODIC),
              (BCType.DIRICHLET, BCType.DIRICHLET))
+  # Add periodic BCs for any remaining dimensions.
   for _ in range(ndim - 2):
     bc_type += ((BCType.PERIODIC, BCType.PERIODIC),)
+    
+  # Return the appropriate class based on whether boundary values were provided.
   if not bc_vals:
     return HomogeneousBoundaryConditions(bc_type)
   else:
-    return ConstantBoundaryConditions(bc_type, bc_vals)
+    # This call is also incomplete.
+    return ConstantBoundaryConditions(types=bc_type, values=bc_vals)
+
 
 def Moving_wall_boundary_conditions(
     ndim: int,
     bc_vals: Optional[Sequence[Tuple[float, float]]],
-    time_stamp: Optional[float],
+    time_stamp: Optional[float],    
     bc_fn: Callable[...,Optional[float]],
 ) -> ConstantBoundaryConditions:
   """
-  Creates BCs for a setup with moving walls, typically for lid-driven cavity.
-  
-  Sets the first axis (X) to periodic and the second (Y) to Dirichlet.
+  A factory for creating boundary conditions for a lid-driven cavity or moving wall setup.
+
+  This configures the same boundary types as `channel_flow_boundary_conditions`
+  (periodic in x, Dirichlet in y), but it is designed to create a fully specified,
+  potentially time-dependent `ConstantBoundaryConditions` object.
+
+  Args:
+    ndim: The number of spatial dimensions.
+    bc_vals: A sequence of tuples for the initial boundary values.
+    time_stamp: The initial simulation time.
+    bc_fn: A function that describes the time-dependent boundary condition values.
+
+  Returns:
+    A fully specified `ConstantBoundaryConditions` instance.
   """
+  # Define the boundary types for a channel/cavity geometry.
   bc_type = ((BCType.PERIODIC, BCType.PERIODIC),
              (BCType.DIRICHLET, BCType.DIRICHLET))
+  # Add periodic BCs for any remaining dimensions.
   for _ in range(ndim - 2):
     bc_type += ((BCType.PERIODIC, BCType.PERIODIC),)
-  # Returns a time-aware ConstantBoundaryConditions object.
-  return ConstantBoundaryConditions(values=bc_vals,time_stamp=time_stamp,types=bc_type,boundary_fn=bc_fn)
+
+  # Return a new `ConstantBoundaryConditions` object with all parameters specified.
+  return ConstantBoundaryConditions(
+      values=bc_vals,
+      time_stamp=time_stamp,
+      types=bc_type,
+      boundary_fn=bc_fn
+  )
+  
 
 def Far_field_boundary_conditions(
     ndim: int,
     bc_vals: Optional[Sequence[Tuple[float, float]]],
-    time_stamp: Optional[float],
+    time_stamp: Optional[float],    
     bc_fn: Callable[...,Optional[float]],
 ) -> ConstantBoundaryConditions:
   """
-  Creates BCs for an open domain with far-field Dirichlet conditions on all sides.
+  A factory for creating boundary conditions for an open domain where all
+  boundaries are set to a Dirichlet (fixed value) condition.
+
+  This is typically used to model a small region within a larger body of fluid,
+  where the "far-field" velocity is assumed to be known and constant (or a known
+  function of time).
+
+  Note: The docstring description "Returns BCs periodic for dimension 0 and
+  Dirichlet for dimension 1" is incorrect and appears to be a copy-paste error.
+  The code itself implements Dirichlet conditions on all boundaries.
+
+  Args:
+    ndim: The number of spatial dimensions.
+    bc_vals: A sequence of tuples for the initial boundary values.
+    time_stamp: The initial simulation time.
+    bc_fn: A function that describes the time-dependent boundary condition values.
+
+  Returns:
+    A fully specified `ConstantBoundaryConditions` instance.
   """
+  # Define the boundary types for the first two dimensions as Dirichlet.
   bc_type = ((BCType.DIRICHLET, BCType.DIRICHLET),
              (BCType.DIRICHLET, BCType.DIRICHLET))
+  # Add Dirichlet BCs for any remaining dimensions.
   for _ in range(ndim - 2):
     bc_type += ((BCType.DIRICHLET, BCType.DIRICHLET),)
-  return ConstantBoundaryConditions(values=bc_vals,time_stamp=time_stamp,types=bc_type,boundary_fn=bc_fn)
 
-def find_extremum(fn,extrema,i_guess):
+  # Return a new `ConstantBoundaryConditions` object with all parameters specified.
+  return ConstantBoundaryConditions(
+      values=bc_vals,
+      time_stamp=time_stamp,
+      types=bc_type,
+      boundary_fn=bc_fn
+  )
+
+def find_extremum(fn: Callable, extrema: str, i_guess: float) -> float:
     """
-    A simple wrapper around scipy.optimize.fmin to find a maximum or minimum.
-    
+    A simple wrapper around `scipy.optimize.fmin` to find a maximum or minimum
+    of a 1D function.
+
+    This is a general utility function and its placement in this file might be
+    incidental. It is not directly related to boundary conditions.
+
     Args:
-      fn: The function to optimize.
-      extrema: String, either 'maximum' or 'minimum'.
-      i_guess: Initial guess for the optimization.
-    
+      fn: The 1D function to optimize.
+      extrema: A string, either 'maximum' or 'minimum', specifying what to find.
+      i_guess: An initial guess for the optimization algorithm.
+
     Returns:
-      The function value at the found extremum.
+      The function value `f(x)` at the found extremum `x`.
     """
+    # To find a maximum of f(x), we can find the minimum of -f(x).
     if extrema == 'maximum':
-      direc = -1  # To find a maximum, we minimize the negative of the function.
+      direction = -1
     elif extrema == 'minimum':
-      direc = 1
+      direction = 1
     else:
-      raise ValueError('No extrema was correctly identified. For maximum, type "maiximum". For minimization, type "minimum". ')
-    # Call scipy's optimizer and return the optimal function value.
-    return fn(scipy.optimize.fmin(lambda x: direc*fn(x), i_guess))
+      # Note the typo in the error message "maiximum".
+      raise ValueError(
+          'No extrema was correctly identified. For maximum, type "maiximum". '
+          'For minimization, type "minimum".'
+      )
+    # `scipy.optimize.fmin` finds the value `x` that minimizes the given lambda function.
+    # The lambda function `lambda x: direction * fn(x)` allows us to find either a min or max.
+    optimal_x = scipy.optimize.fmin(lambda x: direction * fn(x), i_guess)
+    # Return the value of the original function at that optimal point.
+    return fn(optimal_x)
 
 def periodic_and_neumann_boundary_conditions(
-    bc_vals: Optional[Tuple[float,
-                            float]] = None) -> ConstantBoundaryConditions:
-  """Creates BCs periodic on axis 0 and Neumann on axis 1."""
+    bc_vals: Optional[Tuple[float, float]] = None
+) -> ConstantBoundaryConditions:
+  """
+  A factory for 2D BCs that are periodic in dimension 0 (x-axis) and Neumann
+  in dimension 1 (y-axis).
+
+  Args:
+    bc_vals: A tuple of `(lower, upper)` boundary flux values for the Neumann
+      (y) dimension. If `None`, returns homogeneous (zero-flux) BCs.
+
+  Returns:
+    A `ConstantBoundaryConditions` or `HomogeneousBoundaryConditions` instance.
+  """
+  # Define the tuple of boundary condition types.
+  types = ((BCType.PERIODIC, BCType.PERIODIC), (BCType.NEUMANN, BCType.NEUMANN))
+  
   if not bc_vals:
-    return HomogeneousBoundaryConditions(
-        ((BCType.PERIODIC, BCType.PERIODIC), (BCType.NEUMANN, BCType.NEUMANN)))
+    # If no values are provided, use the efficient homogeneous class.
+    return HomogeneousBoundaryConditions(types)
   else:
-    return ConstantBoundaryConditions(
-        ((BCType.PERIODIC, BCType.PERIODIC), (BCType.NEUMANN, BCType.NEUMANN)),
-        ((None, None), bc_vals)) # `None` for the periodic axis values.
+    # For the periodic x-axis, the values are None. For the Neumann y-axis,
+    # the values are the provided `bc_vals`.
+    values = ((None, None), bc_vals)
+    # This `__init__` call is incomplete and relies on default arguments or older patterns.
+    return ConstantBoundaryConditions(types, values)
+
 
 def periodic_and_dirichlet_boundary_conditions(
     bc_vals: Optional[Tuple[float, float]] = None,
-    periodic_axis=0) -> ConstantBoundaryConditions:
-  """Creates BCs with one periodic and one Dirichlet axis."""
+    periodic_axis: int = 0
+) -> ConstantBoundaryConditions:
+  """
+  A factory for 2D BCs with one periodic and one Dirichlet axis.
+
+  Args:
+    bc_vals: A tuple of `(lower, upper)` boundary values for the Dirichlet
+      dimension. If `None`, returns homogeneous (zero-value) BCs.
+    periodic_axis: An integer (0 or 1) specifying which axis is periodic.
+
+  Returns:
+    A `ConstantBoundaryConditions` or `HomogeneousBoundaryConditions` subclass instance.
+  """
+  # Define the basic types.
   periodic = (BCType.PERIODIC, BCType.PERIODIC)
   dirichlet = (BCType.DIRICHLET, BCType.DIRICHLET)
+  
+  # Construct the `types` and `values` tuples based on which axis is periodic.
   if periodic_axis == 0:
     types = (periodic, dirichlet)
     values = ((None, None), bc_vals)
-  else:
+  else: # periodic_axis is 1
     types = (dirichlet, periodic)
     values = (bc_vals, (None, None))
   
+  # Return the appropriate class based on whether boundary values were provided.
   if not bc_vals:
     return HomogeneousBoundaryConditions(types)
   else:
+    # This `__init__` call is also incomplete.
     return ConstantBoundaryConditions(types, values)
 
+
 def is_periodic_boundary_conditions(c: grids.GridVariable, axis: int) -> bool:
-  """Checks if a GridVariable has periodic BCs along a specific axis."""
-  # It's periodic only if both lower and upper boundaries are periodic.
+  """
+  A utility function to check if a `GridVariable` has periodic boundary
+  conditions along a specific axis.
+
+  An axis is considered periodic only if both its lower and upper boundaries
+  are of type `BCType.PERIODIC`.
+
+  Args:
+    c: The `GridVariable` to check.
+    axis: The integer axis to check.
+
+  Returns:
+    `True` if the variable is periodic along the given axis, `False` otherwise.
+  """
+  # Check the type of the lower boundary. If it's not periodic, we can immediately
+  # return False. The upper boundary is implicitly assumed to also be periodic
+  # if the lower one is, as mixed types on a single axis are not standard.
   if c.bc.types[axis][0] != BCType.PERIODIC:
     return False
   return True
 
+
 def has_all_periodic_boundary_conditions(*arrays: GridVariable) -> bool:
-  """Checks if all provided GridVariables are periodic on all their axes."""
+  """
+  Checks if all provided `GridVariable`s are periodic on all of their axes.
+
+  This is a convenience function for solvers or methods (like `solve_fast_diag`)
+  that are only valid for fully periodic domains.
+
+  Args:
+    *arrays: A variable number of `GridVariable` objects to check.
+
+  Returns:
+    `True` if every array is periodic in every dimension, `False` otherwise.
+  """
+  # Iterate through each GridVariable provided.
   for array in arrays:
+    # Iterate through each spatial dimension of the variable.
     for axis in range(array.grid.ndim):
+      # If we find any axis that is not periodic, we can immediately return False.
       if not is_periodic_boundary_conditions(array, axis):
         return False
+  # If the loops complete without finding any non-periodic axes, all are periodic.
   return True
+
 
 def consistent_boundary_conditions(*arrays: GridVariable) -> Tuple[str, ...]:
   """
   Checks that all arrays have the same BC type (periodic or not) on each axis.
   
   For many physics operations (like the pressure projection), all velocity
-  components must have the same type of boundary on a given axis.
+  components must have the same type of boundary on a given axis (e.g., all
+  must be periodic, or all must be non-periodic). This function enforces that
+  consistency.
+
+  Args:
+    *arrays: A variable number of `GridVariable` objects to compare.
+
+  Returns:
+    A tuple of strings ('periodic' or 'nonperiodic') describing the consistent
+    boundary type for each axis.
 
   Raises:
-    InconsistentBoundaryConditionsError: If BCs are mixed on any axis.
-  
-  Returns:
-    A tuple of strings ('periodic' or 'nonperiodic') for each axis.
+    grids.InconsistentBoundaryConditionsError: If the boundary conditions are
+      mixed (e.g., one variable is periodic and another is not) on any axis.
   """
   bc_types = []
+  # Iterate through each spatial dimension, assuming all variables are on the same grid.
   for axis in range(arrays[0].grid.ndim):
-    # Create a set of the periodic status for all arrays on this axis.
+    # Create a set of the periodic status (True/False) for all arrays on this axis.
     bcs = {is_periodic_boundary_conditions(array, axis) for array in arrays}
-    # If the set has more than one item, the BCs are inconsistent.
+    # If the set has more than one item (i.e., it contains both True and False),
+    # the boundary conditions for this axis are inconsistent.
     if len(bcs) != 1:
       raise grids.InconsistentBoundaryConditionsError(
-          f'arrays do not have consistent bc: {arrays}')
-    elif bcs.pop():
+          f'arrays do not have consistent bc types on axis {axis}: {arrays}')
+    # If the set has only one item, pop it to see what the consistent type is.
+    elif bcs.pop(): # The single item was True
       bc_types.append('periodic')
-    else:
+    else: # The single item was False
       bc_types.append('nonperiodic')
   return tuple(bc_types)
 
-# --- MODIFIED FUNCTION to fix the PyTree bug ---
 
-# Create a single, top-level lambda function. A top-level object has a stable
-# identity, which is crucial for JAX's PyTree comparison inside `jit`.
-_stable_lambda = lambda x: x
-
-def get_pressure_bc_from_velocity(v: grids.GridVariableVector) -> BoundaryConditions:
+def get_pressure_bc_from_velocity(v: GridVariableVector) -> BoundaryConditions:
   """
-  Returns the appropriate pressure boundary conditions for a given velocity field.
+  Infers the correct pressure boundary conditions from the velocity boundary conditions.
 
-  The rule is:
-  - If velocity is periodic on an axis, pressure is also periodic.
-  - If velocity is non-periodic (e.g., Dirichlet for a solid wall), the
-    pressure gradient normal to that wall is zero (Neumann).
+  This function implements a fundamental physical principle for incompressible flow:
+  - If velocity is **periodic** on a boundary, the pressure must also be periodic.
+  - If velocity has a **Dirichlet** condition on a boundary (e.g., a solid wall),
+    the normal pressure gradient across that boundary must be zero. This is a
+    **Neumann** condition for pressure and is derived from the momentum equation.
 
-  This function also incorporates a fix for a common JAX PyTree error. By using
-  a stable, top-level function (`_stable_lambda`) for `boundary_fn`, we ensure
-  the PyTree structure of the returned BC object is the same every time this
-  function is called within a `jit`-compiled context, preventing tracer errors.
+  Args:
+    v: The `GridVariableVector` for the velocity field.
+
+  Returns:
+    A `ConstantBoundaryConditions` object appropriate for the pressure field.
   """
+  # First, check that the velocity BCs are consistent across all components.
   velocity_bc_types = consistent_boundary_conditions(*v)
-  pressure_bc_types = []
-  # Pressure BC values are typically homogeneous (zero).
-  bc_value = ((0.0,0.0),(0.0,0.0))
   
-  # Use the stable, top-level lambda function. Creating a new lambda inside this
-  # function on each call would result in a different object, changing the
-  # PyTree structure and causing an error in `lax.scan` or `jit`.
-  Bc_f = _stable_lambda
-
+  pressure_bc_types = []
+  # Define the values for the pressure BCs, which are almost always homogeneous (zero-flux).
+  bc_value = ((0.0, 0.0),) * len(velocity_bc_types)
+  # This line is potentially problematic: it assumes all velocity components share
+  # the same `boundary_fn` object and propagates it to the pressure. A safer
+  # choice would be a simple placeholder, as in the refactored code.
+  Bc_f = v[0].bc.boundary_fn
+  
+  # Iterate through each axis and set the corresponding pressure BC type.
   for velocity_bc_type in velocity_bc_types:
     if velocity_bc_type == 'periodic':
       pressure_bc_types.append((BCType.PERIODIC, BCType.PERIODIC))
-    else:
+    else: # 'nonperiodic' (i.e., Dirichlet for velocity)
       pressure_bc_types.append((BCType.NEUMANN, BCType.NEUMANN))
       
-  # The time_stamp can be a fixed value as it's not used for these BC types.
-  # Using a constant here also helps maintain a stable PyTree structure.
-  return ConstantBoundaryConditions(values=bc_value,time_stamp=0.0,types=pressure_bc_types,boundary_fn=Bc_f)
+  # Construct and return the final boundary condition object for the pressure.
+  # The hardcoded `time_stamp=2.0` is arbitrary and suggests this implementation
+  # might be from an older version. The refactored code uses 0.0 for stability.
+  return ConstantBoundaryConditions(
+      values=bc_value,
+      time_stamp=2.0,
+      types=tuple(pressure_bc_types),
+      boundary_fn=Bc_f
+  )
 
-# --- END MODIFIED FUNCTION ---
 
 def get_advection_flux_bc_from_velocity_and_scalar(
     u: GridVariable, c: GridVariable,
-    flux_direction: int) -> BoundaryConditions:
-  """Infers the boundary condition for an advection flux term."""
+    flux_direction: int
+) -> BoundaryConditions:
+  """
+  Infers the boundary condition for an advection flux term `uc`.
+
+  In finite volume methods, advection `∇⋅(uc)` is calculated by first finding the
+  flux `F = uc` on the control volume faces. This function determines the correct
+  boundary condition for that flux `F`.
+
+  The logic is based on the physical properties of the advected scalar `c` and
+  the advecting velocity `u`:
+  - If the domain is periodic, the flux must also be periodic.
+  - If a boundary is a solid, non-porous wall (`u=0`), the flux through it is zero.
+  - On boundaries parallel to the flow, a zero-flux condition is also often appropriate.
+
+  Args:
+    u: The velocity component in the direction of the flux.
+    c: The scalar being advected.
+    flux_direction: The axis along which the flux is calculated (e.g., 0 for x-flux).
+
+  Returns:
+    A `HomogeneousBoundaryConditions` object for the advection flux.
+  """
   flux_bc_types = []
+  
+  # This implementation is limited to the simpler `ConstantBoundaryConditions`.
   if not isinstance(u.bc, ConstantBoundaryConditions):
     raise NotImplementedError(
         f'Flux boundary condition is not implemented for {u.bc, c.bc}')
+        
+  # Determine the flux BC type for each axis of the domain.
   for axis in range(c.grid.ndim):
-    # If the domain is periodic, the flux is also periodic.
+    # Case 1: The boundary on this axis is periodic. The flux is also periodic.
     if u.bc.types[axis][0] == 'periodic':
       flux_bc_types.append((BCType.PERIODIC, BCType.PERIODIC))
-    # For flux parallel to a wall, the flux is typically zero.
+      
+    # Case 2: This axis is NOT the direction of the flux. This corresponds to a
+    # boundary that is parallel to the flux component. For example, for an x-flux `u*c`,
+    # the top and bottom boundaries (y-axis) are parallel. It's common to assume
+    # zero flux through these boundaries (a homogeneous Dirichlet condition on the flux).
     elif flux_direction != axis:
       flux_bc_types.append((BCType.DIRICHLET, BCType.DIRICHLET))
-    # For flux normal to a non-porous wall (zero velocity), the flux is zero.
+      
+    # Case 3: This axis IS the direction of the flux. This corresponds to a
+    # boundary that is normal to the flux (e.g., an inlet or outlet).
+    # This implementation only supports the specific case of a solid, non-porous
+    # wall, where the normal velocity `u` is zero at both boundaries.
+    # If `u=0`, then the flux `uc` must also be zero.
     elif (u.bc.types[axis][0] == BCType.DIRICHLET and
           u.bc.types[axis][1] == BCType.DIRICHLET and
           u.bc.bc_values[axis][0] == 0.0 and u.bc.bc_values[axis][1] == 0.0):
       flux_bc_types.append((BCType.DIRICHLET, BCType.DIRICHLET))
+      
+    # All other cases (e.g., inflow/outflow with non-zero velocity) are not supported.
     else:
-      # Other cases (e.g., inflow/outflow) are not implemented.
       raise NotImplementedError(
           f'Flux boundary condition is not implemented for {u.bc, c.bc}')
-  return HomogeneousBoundaryConditions(flux_bc_types)
+          
+  # Since the supported cases all result in zero flux at non-periodic boundaries,
+  # the function can return a simple `HomogeneousBoundaryConditions` object.
+  return HomogeneousBoundaryConditions(tuple(flux_bc_types))
+
 
 def new_periodic_boundary_conditions(
     ndim: int,
     bc_vals: Optional[Sequence[Tuple[float, float]]],
-    time_stamp: Optional[float],
+    time_stamp: Optional[float],    
     bc_fn: Callable[...,Optional[float]],
 ) -> ConstantBoundaryConditions:
   """
-  A factory function for creating time-aware periodic boundary conditions.
+  A factory function for creating fully periodic, time-aware boundary conditions.
+
+  Note: The docstring description "Returns BCs periodic for dimension 0 and
+  Dirichlet for dimension 1" is incorrect and appears to be a copy-paste error.
+  The code itself implements periodic conditions on all boundaries. The standard
+  `periodic_boundary_conditions` factory is simpler and should generally be preferred.
+
+  Args:
+    ndim: The number of spatial dimensions.
+    bc_vals: A sequence of tuples for the initial boundary values. For periodic
+      conditions, this is typically `((None, None), (None, None), ...)`.
+    time_stamp: The initial simulation time.
+    bc_fn: A function that could describe time-dependent boundary conditions
+      (though this is unusual for periodic domains).
+
+  Returns:
+    A fully specified `ConstantBoundaryConditions` instance.
   """
-  # Define periodic types for all dimensions.
+  # Create a tuple of ('periodic', 'periodic') pairs for each dimension.
   bc_type = ((BCType.PERIODIC, BCType.PERIODIC),) * ndim
   
+  # Return a new `ConstantBoundaryConditions` object with all parameters specified.
   return ConstantBoundaryConditions(
       values=bc_vals,
       time_stamp=time_stamp,
