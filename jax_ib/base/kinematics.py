@@ -28,49 +28,57 @@ import jax
 import jax.numpy as jnp
 
 
-def displacement(parameters, t):
+def displacement(parameters: list, t: float) -> jnp.ndarray:
     """
     Calculates a simple sinusoidal displacement along the x-axis.
 
+    This function defines a basic oscillatory motion for an object, which can
+    be useful for simple test cases or validation studies.
+
     Args:
-      parameters: A list containing `[A0, f]`, where `A0` is the amplitude
-        and `f` is the frequency of the oscillation.
+      parameters: A list containing a single tuple `(A0, f)`, where `A0` is the
+        amplitude and `f` is the frequency of the oscillation.
       t: The current simulation time.
 
     Returns:
       A 2D JAX array representing the `[x, y]` displacement vector.
     """
     # Unpack the amplitude and frequency from the input parameters.
+    # The `*parameters` syntax unpacks the list, and `list()` converts the tuple.
     A0,f = list(*parameters)
-    # The motion is purely in the x-direction.
+    # The motion is purely in the x-direction, described by a cosine function.
     return jnp.array([A0/2*jnp.cos(2*jnp.pi*f*t),0.])
     
     
-def rotation(parameters, t):
+def rotation(parameters: list, t: float) -> float:
     """
     Calculates a simple sinusoidal rotation angle.
 
+    This function defines a basic pitching or rotating motion for an object.
+
     Args:
-      parameters: A list containing `[alpha0, beta, f, phi]`, where `alpha0` is
-        the mean angle, `beta` is the amplitude of oscillation, `f` is the
-        frequency, and `phi` is the phase offset.
+      parameters: A list containing a single tuple `(alpha0, beta, f, phi)`,
+        where `alpha0` is the mean angle, `beta` is the amplitude of oscillation,
+        `f` is the frequency, and `phi` is the phase offset.
       t: The current simulation time.
 
     Returns:
-      A float representing the rotation angle in radians.
+      A float representing the rotation angle in radians at time `t`.
     """
-    # Unpack the rotational parameters.
+    # Unpack the rotational parameters from the input list.
     alpha0,beta,f,phi = list(*parameters)
-    # The angle oscillates around a mean value `alpha0`.
+    # The angle oscillates sinusoidally around a mean value `alpha0`.
     return alpha0 + beta*jnp.sin(2*jnp.pi*f*t+phi)
 
-def Displacement_Foil_Fourier_Dotted_Mutliple(parameters, t):
+def Displacement_Foil_Fourier_Dotted_Mutliple(parameters: list, t: float) -> jnp.ndarray:
     """
     Calculates a complex foil displacement based on a Fourier series.
-    This function is designed to work with a batch of multiple particles.
+    This function is designed to work with a batch of multiple particles,
+    allowing for efficient computation of many particle trajectories at once.
 
     The displacement is a combination of a constant-velocity forward motion and
-    a vertical "heaving" motion described by a Fourier series.
+    a vertical "heaving" motion described by a Fourier series. This is a common
+    kinematic model for flapping or swimming foils.
 
     Args:
       parameters: A list of parameter sets, one for each particle. Each set is
@@ -78,8 +86,8 @@ def Displacement_Foil_Fourier_Dotted_Mutliple(parameters, t):
         - `alpha0`: Forward velocity component.
         - `f`: Fundamental frequency.
         - `phi`: Phase offset.
-        - `alpha`: Amplitudes for the sine (heaving) terms of the Fourier series.
-        - `beta`: Amplitudes for the cosine (pitching) terms of the Fourier series.
+        - `alpha`: An array of amplitudes for the sine (heaving) terms of the Fourier series.
+        - `beta`: An array of amplitudes for the cosine (pitching) terms of the Fourier series.
         - `p`: A coupling factor between pitch and heave.
       t: The current simulation time.
 
@@ -90,9 +98,10 @@ def Displacement_Foil_Fourier_Dotted_Mutliple(parameters, t):
     # --- Unpack parameters for all particles ---
     # This complex unpacking reshapes the list of tuples into separate arrays
     # for each parameter, where each row corresponds to a particle.
+    # `zip(*parameters)` transposes the list of tuples.
     alpha0=jnp.array(list(list(zip(*parameters))[0]))
     f =jnp.array(list(list(zip(*parameters))[1]))
-    phi = jnp.array(list(list(zip(*parameters))[2]))
+    phi =jnp.array(list(list(zip(*parameters))[2]))
     alpha = jnp.array(list(list(zip(*parameters))[3])) # Shape: (N_particles, N_fourier_terms)
     beta = jnp.array(list(list(zip(*parameters))[4]))
     p = jnp.array(list(list(zip(*parameters))[5]))
@@ -103,45 +112,55 @@ def Displacement_Foil_Fourier_Dotted_Mutliple(parameters, t):
     N_particles =len(alpha)
 
     # Create an array of harmonic numbers [1, 2, 3, ...] for the Fourier series.
+    # This will have shape (N_particles, size_parameters).
     frequencies = jnp.array([jnp.arange(1,size_parameters+1)]*N_particles)
 
     # --- Calculate the argument of the sin/cos functions ---
     # This computes `(2*pi*n*f*t + phi)` for each particle and each Fourier term `n`.
-    # Reshaping allows for broadcasting across all terms.
+    # Reshaping `f` and `phi` to column vectors `(N_particles, 1)` allows JAX
+    # to broadcast them correctly across the `frequencies` array.
     inside_function =jnp.add(2*jnp.pi*t*frequencies*f.reshape(N_particles,1),phi.reshape(N_particles,1))
   
     # --- Sum the Fourier series to get the vertical (heaving) motion ---
-    # `alpha_1 = Σ [alpha_n * sin(arg_n) + p * beta_n * cos(arg_n)]`
+    # This computes `Σ [alpha_n * sin(arg_n)]` for each particle.
     alpha_1 = (alpha*jnp.sin(inside_function)).sum(axis=1)
+    # This adds the pitch-coupled term `Σ [p * beta_n * cos(arg_n)]`.
     alpha_1 += p*(beta*jnp.cos(inside_function)).sum(axis=1)
     
     # The x-displacement is a simple constant velocity motion.
-    # The final displacement is a combination of forward and heaving motion.
+    # The final displacement is a combination of forward and heaving motion,
+    # returned as a shape (2, N_particles) array.
     return jnp.array([-alpha0*t,alpha_1])
 
     
 def rotation_Foil_Fourier_Dotted_Mutliple(parameters, t):
     """
     Calculates a complex foil rotation (pitching) based on a Fourier series.
-    This function is designed to work with a batch of multiple particles.
+    This function is designed to work efficiently with a batch of multiple particles.
 
     The structure is very similar to the displacement function, but it computes
-    the rotational angle instead of the y-position.
+    the rotational angle instead of the y-position. The total angle is a sum of
+    a steady rotation and an oscillatory pitching motion described by a Fourier series.
 
     Args:
       parameters: A list of parameter sets, one for each particle. Each set is
         a tuple: `(alpha0, f, phi, alpha, beta, p)`.
-        - `alpha0`: Mean angular velocity component.
-        - `f`, `phi`, `alpha`, `beta`, `p`: Fourier series parameters for pitching motion.
+        - `alpha0`: Mean angular velocity component (steady rotation rate).
+        - `f`: Fundamental frequency of the oscillation.
+        - `phi`: Phase offset of the oscillation.
+        - `alpha`: An array of amplitudes for the sine terms of the Fourier series.
+        - `beta`: An array of amplitudes for the cosine terms of the Fourier series.
+        - `p`: A coupling factor (role might be specific to the physical model).
       t: The current simulation time.
 
     Returns:
-      A 1D JAX array of shape `(N_particles,)` containing the rotation angle for
-      each particle.
+      A 1D JAX array of shape `(N_particles,)` containing the rotation angle in
+      radians for each particle at time `t`.
     """
-    # The commented out line is a placeholder for the parameter structure.
+    # The commented out line is a placeholder showing the parameter structure.
     #alpha0,f,phi,alpha,beta,p = parameters
-    # --- Unpack parameters (identical to the displacement function) ---
+    
+    # --- Unpack parameters for all particles (identical to the displacement function) ---
     alpha0=jnp.array(list(list(zip(*parameters))[0]))
     f =jnp.array(list(list(zip(*parameters))[1]))
     phi = jnp.array(list(list(zip(*parameters))[2]))
@@ -149,13 +168,14 @@ def rotation_Foil_Fourier_Dotted_Mutliple(parameters, t):
     beta = jnp.array(list(list(zip(*parameters))[4]))
     p = jnp.array(list(list(zip(*parameters))[5]))
     
+    # Get dimensions from the shape of the input parameter arrays.
     size_parameters = alpha.shape[1]
     N_particles =len(alpha)
 
-    # Create an array of the size (nparticles, nparameters)
+    # Create an array of harmonic numbers [1, 2, 3, ...] for the Fourier series.
     frequencies = jnp.array([jnp.arange(1,size_parameters+1)]*N_particles)
 
-    # --- Calculate the argument of the sin/cos functions (identical) ---
+    # --- Calculate the argument of the sin/cos functions (identical to displacement) ---
     inside_function =jnp.add(2*jnp.pi*t*frequencies*f.reshape(N_particles,1),phi.reshape(N_particles,1))
   
     # --- Sum the Fourier series to get the oscillatory part of the pitching motion ---
@@ -164,7 +184,9 @@ def rotation_Foil_Fourier_Dotted_Mutliple(parameters, t):
     
     # The commented out line was likely for debugging or handling a single particle case.
     #if N_particles>1:
-    # The final angle is the sum of a steady rotation and the oscillation.
+    
+    # The final angle is the sum of a steady, linearly increasing rotation (`alpha0*t`)
+    # and the complex oscillation (`alpha_1`).
     return alpha0*t + alpha_1
 
 def rotation_Foil_Fourier_Dotted_Mutliple_NORMALIZED(parameters, t):
@@ -172,8 +194,9 @@ def rotation_Foil_Fourier_Dotted_Mutliple_NORMALIZED(parameters, t):
     Calculates a normalized, complex foil rotation based on a Fourier series.
 
     This function is similar to the one above but includes a normalization factor.
-    The goal of this normalization is likely to achieve a specific mean angle of
-    attack (`theta_av`) over a full period of motion.
+    The goal of this normalization is likely to scale the entire motion profile
+    such that the time-averaged angle of attack over one full period of motion
+    is equal to a desired value, `theta_av`.
 
     Args:
       parameters: An expanded list of parameter sets for multiple particles.
@@ -185,44 +208,45 @@ def rotation_Foil_Fourier_Dotted_Mutliple_NORMALIZED(parameters, t):
       A 1D JAX array of the normalized rotation angle for each particle.
     """
     #alpha0,f,phi,alpha,beta,p = parameters
-    # --- Unpack parameters, including the new `theta_av` ---
+    # --- Unpack parameters, including the new `theta_av` and an extra `p` ---
     alpha0=jnp.array(list(list(zip(*parameters))[0]))
     f =jnp.array(list(list(zip(*parameters))[1]))
     phi = jnp.array(list(list(zip(*parameters))[2]))
     alpha = jnp.array(list(list(zip(*parameters))[3]))
     beta = jnp.array(list(list(zip(*parameters))[4]))
     theta_av = jnp.array(list(list(zip(*parameters))[5]))
-    p = jnp.array(list(list(zip(*parameters))[6]))
+    p = jnp.array(list(list(zip(*parameters))[6])) # Note: This `p` is at index 6
     
     size_parameters = alpha.shape[1]
     N_particles =len(alpha)
 
-    # Create an array of the size (nparticles, nparameters)
+    # Create an array of harmonic numbers [1, 2, 3, ...] for the Fourier series.
     frequencies = jnp.array([jnp.arange(1,size_parameters+1)]*N_particles)
 
     # --- Calculate the time-dependent part of the angle (alpha_1) ---
-    # This is identical to the un-normalized version.
+    # This is the instantaneous un-normalized angle at time `t`.
     inside_function =jnp.add(2*jnp.pi*t*frequencies*f.reshape(N_particles,1),phi.reshape(N_particles,1))
     alpha_1 = (alpha*jnp.sin(inside_function)).sum(axis=1)
     alpha_1 += p*(beta*jnp.cos(inside_function)).sum(axis=1)
     
     # --- Calculate the normalization factor ---
-    # To normalize, we need to find the range of motion over one period.
-    # This is done by calculating the angle at the end of the first period (t=1/f)
-    # and at the beginning (t=0).
+    # To normalize, we need to find the total change in angle over one full period.
+    # Assuming the fundamental period is T=1/f, we evaluate the angle at t=T and t=0.
     
-    # Calculate the angle at the end of the period (approximated here by t=1, assuming f=1).
+    # Calculate the oscillatory part of the angle at the end of the first period (t=1/f).
+    # Here, `2*pi*f*t` becomes just `2*pi`.
     inside_function2 =jnp.add(2*jnp.pi*frequencies,phi.reshape(N_particles,1))
     alpha_2 = (alpha*jnp.sin(inside_function2)).sum(axis=1)
     alpha_2 += p*(beta*jnp.cos(inside_function2)).sum(axis=1)
     
-    # Calculate the angle at the beginning (t=0).
+    # Calculate the oscillatory part of the angle at the beginning (t=0).
     inside_function3 =jnp.add(2*jnp.pi*frequencies*0.0,phi.reshape(N_particles,1))
     alpha_3 = (alpha*jnp.sin(inside_function3)).sum(axis=1)
     alpha_3 += p*(beta*jnp.cos(inside_function3)).sum(axis=1)
     
-    # The un-normalized angle is `(alpha0*t + alpha_1)`.
-    # The normalization factor scales this result so that its time average becomes `theta_av`.
-    # The denominator `(alpha0 + alpha_2 - alpha_3)` represents the total change in angle
-    # over one period.
-    return theta_av*(alpha0*t + alpha_1)/(alpha0 + alpha_2-alpha_3)
+    # The denominator `(alpha0 + alpha_2 - alpha_3)` represents the total change
+    # in angle over one period: `(alpha0*T + alpha_2) - (alpha0*0 + alpha_3)`.
+    # It seems T=1 is assumed here.
+    # The final expression scales the instantaneous un-normalized angle `(alpha0*t + alpha_1)`
+    # by the ratio of the desired average angle to the calculated total change in angle.
+    return theta_av*(alpha0*t + alpha_1)/(alpha0 + alpha_2 - alpha_3)
