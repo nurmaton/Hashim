@@ -17,6 +17,7 @@ def calculate_tension_force(xp, yp, sigma):
     l_hat_x_prev, l_hat_y_prev = jnp.roll(l_hat_x, 1), jnp.roll(l_hat_y, 1)
     
     # The force is the difference in the tangent vectors, which measures curvature.
+    # The sign convention used here is standard for a force that pulls inward.
     force_x = sigma * (l_hat_x - l_hat_x_prev)
     force_y = sigma * (l_hat_y - l_hat_y_prev)
     return force_x, force_y
@@ -41,11 +42,35 @@ def Integrate_Field_Fluid_Domain(field):
     return integrate_trapz(field.data,dxEUL,dyEUL)
 
 # --- HEAVILY REWRITTEN CORE FUNCTION ---
-# OLD vs NEW:
-# - The function signature is completely different. It no longer takes kinematic functions
-#   (dx_dt, rotation, etc.). Instead, it takes a single stateful 'particle' object.
-# - The core logic has changed from calculating a velocity-mismatch force to calculating
-#   real physical forces (penalty and tension).
+#
+# OLD vs NEW COMPARISON & EXPLANATION:
+#
+# WHY THE CHANGE WAS MADE:
+# The OLD `IBM_force_GENERAL` was for a "Direct Forcing" method suitable for kinematically-prescribed
+# (i.e., non-deformable, pre-determined) motion. The NEW version implements the "Penalty Method",
+# which is essential for simulating truly dynamic, DEFORMABLE objects as described in the paper.
+#
+# KEY DIFFERENCES:
+# 1. FUNCTION SIGNATURE:
+#    - OLD: Took many kinematic arguments like `dx_dt`, `rotation`, `particle_center`, etc.
+#           This was necessary to calculate the pre-determined velocity `UP` of the boundary.
+#    - NEW: Takes a single stateful `particle` object. This is a cleaner, object-oriented
+#           approach where the particle's current state (positions, properties) is passed directly.
+#
+# 2. FORCE CALCULATION LOGIC:
+#    - OLD: The force was a FICTITIOUS, non-physical term calculated to enforce a no-slip
+#           boundary condition: `force = (UP - velocity_at_surface) / dt`. It's a correction
+#           force that drives the fluid to match the particle's prescribed velocity.
+#    - NEW: The force is a REAL PHYSICAL force exerted by the particle on the fluid. It is
+#           the sum of the internal penalty spring forces and surface tension forces. This
+#           is the core of the penalty method.
+#
+# WHY THE NEW METHOD IS BETTER (FOR THIS PROBLEM):
+#    - It allows for DEFORMATION. The old method assumed a rigid shape. The new method calculates
+#      forces based on the particle's internal state (how stretched its springs are), which
+#      is what allows it to be deformable.
+#    - It is more physically based, representing real forces like elasticity and tension.
+#
 def IBM_force_GENERAL(field, Xi, particle, discrete_fn):
     
     grid = field.grid
@@ -67,8 +92,8 @@ def IBM_force_GENERAL(field, Xi, particle, discrete_fn):
     penalty_force_x, penalty_force_y = calculate_penalty_force(xp, yp, Ym_x, Ym_y, Kp)
     
     # 2. Calculate the surface tension force (Eq. 7) on the fluid markers.
-    # This section uses jax.lax.cond for efficient conditional execution in JAX.
-    # It avoids using a standard Python 'if' statement, which is not JAX-jittable.
+    # This section uses jax.lax.cond for efficient conditional execution in JAX,
+    # which is preferable to a standard Python 'if' statement for JIT compilation.
     def compute_tension(operands):
         x, y, s = operands
         return calculate_tension_force(x, y, s)
@@ -85,15 +110,16 @@ def IBM_force_GENERAL(field, Xi, particle, discrete_fn):
     )
 
     # 3. The total force ON THE FLUID is the sum of these physical forces.
-    # OLD code: force was a fictitious term (UP - U_fluid)/dt.
-    # NEW code: force is the physical F_penalty + F_tension.
+    # This is the force exerted BY the particle's boundary ON the fluid.
     force_on_fluid_x = penalty_force_x + tension_force_x
     force_on_fluid_y = penalty_force_y + tension_force_y
     
-    # Select the correct force component (X or Y) for the current field.
+    # Select the correct force component (X or Y) for the current velocity field being updated.
     force_to_spread = force_on_fluid_x if Xi == 0 else force_on_fluid_y
 
     # --- Spreading Logic (Structurally similar, but now spreading a physical force) ---
+    # OLD vs NEW: The OLD code also calculated dS, but it was only used for the spreading step.
+    # Here, dS is also used to convert the point forces into a force density.
     x_i, y_i = jnp.roll(xp, -1), jnp.roll(yp, -1)
     dxL, dyL = x_i - xp, y_i - yp
     dS = jnp.sqrt(dxL**2 + dyL**2) + 1e-9
@@ -101,7 +127,8 @@ def IBM_force_GENERAL(field, Xi, particle, discrete_fn):
     # Convert the point force (F) into a force density (F/L) for correct spreading.
     force_density_to_spread = force_to_spread / dS
     
-    # The spreading kernel and mapping logic remains the same.
+    # The spreading kernel and mapping logic remains the same. It is a robust
+    # and efficient way to perform the discrete IBM integration.
     def calc_force(F_density, xp_pt, yp_pt, dss_pt):
         return F_density * discrete_fn(jnp.sqrt((xp_pt - X)**2 + (yp_pt - Y)**2), 0, dxEUL) * dss_pt
 
@@ -123,9 +150,10 @@ def IBM_force_GENERAL(field, Xi, particle, discrete_fn):
 
 # --- REWRITTEN HIGH-LEVEL FUNCTION ---
 # OLD vs NEW:
-# - The loop over particles and reconstruction of kinematic functions is gone.
-# - It's now a simpler wrapper that gets the particle from the container and calls the new IBM_force_GENERAL.
-# - This assumes a single particle simulation, which is what the demo is currently running.
+# - The OLD function iterated through a list of particles, reconstructing the kinematic
+#   functions for each one.
+# - The NEW function is simpler. It assumes a single particle (for now, as in the demo)
+#   and directly calls the new IBM_force_GENERAL with the particle object. It's more direct.
 def IBM_Multiple_NEW(field, Xi, particles_container, discrete_fn):
     # Get the first (and only) particle object from the container.
     particle = particles_container.particles[0]
@@ -137,13 +165,13 @@ def IBM_Multiple_NEW(field, Xi, particles_container, discrete_fn):
 # --- REWRITTEN HIGH-LEVEL FUNCTION ---
 # OLD vs NEW:
 # - The signature is simplified. It no longer needs `surface_fn` because the force
-#   is not based on fluid velocity at the surface.
-# - The lambda function now calls the new, simpler `IBM_Multiple_NEW`.
+#   is not based on fluid velocity at the surface (that logic is now in particle_motion.py).
+# - The `dt` argument is kept for API consistency with the main solver, but is no longer
+#   used in the penalty force calculation itself.
 def calc_IBM_force_NEW_MULTIPLE(all_variables, discrete_fn, dt):
     velocity = all_variables.velocity
     particles = all_variables.particles
     axis = [0, 1]
-    # The lambda function is now simpler. `dt` is passed for API consistency but not used in the new force calculation.
     ibm_forcing = lambda field, Xi: IBM_Multiple_NEW(field, Xi, particles, discrete_fn)
     
     return tuple(grids.GridVariable(ibm_forcing(field, Xi), field.bc) for field, Xi in zip(velocity, axis))
