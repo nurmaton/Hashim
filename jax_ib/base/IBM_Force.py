@@ -87,8 +87,8 @@ def IBM_force_GENERAL(field, Xi, particle, discrete_fn):
     # 3. The total force ON THE FLUID is the sum of these physical forces.
     # OLD code: force was a fictitious term (UP - U_fluid)/dt.
     # NEW code: force is the physical F_penalty + F_tension.
-    force_on_fluid_x = penalty_force_x + tension_force_x
-    force_on_fluid_y = penalty_force_y + tension_force_y
+    force_on_fluid_x = -(penalty_force_x + tension_force_x)
+    force_on_fluid_y = -(penalty_force_y + tension_force_y)
     
     # Select the correct force component (X or Y) for the current field.
     force_to_spread = force_on_fluid_x if Xi == 0 else force_on_fluid_y
