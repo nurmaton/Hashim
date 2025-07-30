@@ -37,12 +37,10 @@ def update_massive_deformable_particle(all_variables, dt, gravity_g=0.0):
     particle = particles_container.particles[0] 
     
     # --- 1. Advect Fluid Markers (X) using the IBM Integral (surface_fn) ---
-    # U_fluid_x_pts, U_fluid_y_pts = interpolate_velocity_to_surface(
-    #     velocity_field, particle.xp, particle.yp, discrete_fn
-    # )
+    U_fluid_x_pts, U_fluid_y_pts = interpolate_velocity_to_surface(velocity_field, particle.xp, particle.yp, discrete_fn)
 
-    U_fluid_x_pts = jax.vmap(interpolation.point_interpolation, in_axes=(0, None))(jnp.stack([particle.xp, particle.yp], axis=1), velocity_field[0].array)
-    U_fluid_y_pts = jax.vmap(interpolation.point_interpolation, in_axes=(0, None))(jnp.stack([particle.xp, particle.yp], axis=1), velocity_field[1].array)
+    # U_fluid_x_pts = jax.vmap(interpolation.point_interpolation, in_axes=(0, None))(jnp.stack([particle.xp, particle.yp], axis=1), velocity_field[0].array)
+    # U_fluid_y_pts = jax.vmap(interpolation.point_interpolation, in_axes=(0, None))(jnp.stack([particle.xp, particle.yp], axis=1), velocity_field[1].array)
     
     
     new_xp = particle.xp + dt * U_fluid_x_pts
