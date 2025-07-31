@@ -19,25 +19,30 @@ gradient, divergence, curl, and Laplacian. These are the fundamental building
 blocks used to construct the terms of the Navier-Stokes equations (e.g.,
 advection, diffusion, pressure gradient).
 
-**Design Philosophy:**
-The functions here operate on `GridVariable` objects and return `GridArray`
-objects. This is a deliberate design choice:
-- **Input (`GridVariable`)**: Evaluating derivatives requires knowledge of the
-  values in neighboring "ghost" cells, which are defined by the boundary
-  conditions. The `GridVariable` class encapsulates both the data array and its
-  associated boundary conditions, which the `.shift()` method uses.
-- **Output (`GridArray`)**: The result of a derivative operation is a new field
-  whose own boundary conditions are not well-defined. For example, if a variable
-  `c` has a Dirichlet boundary condition `c=0`, it is unclear what the boundary
-  condition on its derivative `dc/dx` should be. Therefore, the functions
-  return a `GridArray` (data + grid info, but no BCs), and it is the user's
-  responsibility to associate new boundary conditions with the result if needed.
+**Design Philosophy on a Staggered Grid:**
+The functions in this module are carefully designed to handle the complexities
+of a staggered grid, where different physical quantities (e.g., velocity
+components, pressure) are located at different positions within a grid cell
+(faces vs. centers). The core design principle is:
 
-Example:
-  c = GridVariable(c_array, c_boundary_condition)
-  dcdx = finite_differences.forward_difference(c)  # dcdx is a GridArray
-  c_new_data = c.data + dt * (-velocity.data * dcdx.data) # Operations on arrays
-  c_new = GridVariable(GridArray(c_new_data, c.offset, c.grid), c_boundary_condition)
+- **Input (`GridVariable`)**: To evaluate a derivative, a function needs access
+  to values in neighboring "ghost" cells, which are defined by the variable's
+  boundary conditions. All functions here therefore take `GridVariable` objects
+  as input, because this class encapsulates both the data array and its
+  associated boundary conditions. The internal `.shift()` method automatically
+  handles the BCs when accessing neighbor data.
+
+- **Output (`GridArray`)**: The result of a derivative operation is a new field
+  whose physical location (offset) on the grid is different from the input,
+  and whose own boundary conditions are not well-defined. For example, if a
+  variable `c` has a Dirichlet BC `c=0`, it is unclear what the BC on its
+  derivative `dc/dx` should be. To avoid making unsafe assumptions, all
+  functions return a `GridArray` (data + grid info + new offset, but no BCs).
+  It is the responsibility of the calling function to associate new boundary
+  conditions with this result if needed.
+
+This design ensures that all derivative calculations are explicit and
+numerically correct with respect to the staggered grid layout.
 """
 
 import typing
