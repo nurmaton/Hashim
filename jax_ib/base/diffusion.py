@@ -53,9 +53,9 @@ from typing import Optional
 import jax.scipy.sparse.linalg
 
 # Import necessary components from other modules in the library.
-from jax_ib.base import array_utils
+from jax_cfd.base import array_utils
 from jax_ib.base import boundaries
-from jax_ib.base import fast_diagonalization
+from jax_cfd.base import fast_diagonalization
 from jax_ib.base import finite_differences as fd
 from jax_ib.base import grids
 
