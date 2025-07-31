@@ -15,21 +15,31 @@
 Provides discrete delta functions and convolution operations for the IBM.
 
 This module contains the core mathematical machinery for the Immersed Boundary
-Method (IBM). Its primary purpose is to facilitate communication between the
-fixed Eulerian grid (where fluid properties are defined) and the moving
-Lagrangian markers (which define the particle boundary).
+Method (IBM). Its primary purpose is to facilitate the two-way communication
+between the fixed Eulerian grid (where fluid properties are defined) and the
+moving Lagrangian markers (which define the particle boundary).
 
 This communication is achieved through two related operations, both implemented
-as discrete convolutions (numerical integrals) using a discrete delta function:
+as discrete convolutions (i.e., numerical integrals) using a smooth,
+differentiable approximation of the Dirac delta function:
 
 1.  **Interpolation**: Calculating the value of a fluid field (e.g., velocity)
-    at the location of the Lagrangian markers. `U(X_k) = ∫ u(x) δ(x - X_k) dx`
-2.  **Spreading**: Distributing a force from the Lagrangian markers onto the
-    surrounding fluid grid points. `f(x) = ∫ F(s) δ(x - X(s)) ds`
+    at the location of the Lagrangian markers. This is a "gathering" operation,
+    mathematically represented as:
+    `U(X_k) = ∫ u(x) δ(x - X_k) dx`
 
-The functions here are designed to be highly efficient and scalable using JAX's
-vectorization (`vmap`) and parallelization (`pmap`) capabilities.
+2.  **Spreading**: Distributing a force from the Lagrangian markers onto the
+    surrounding fluid grid points. This is a "spreading" operation,
+    mathematically represented as:
+    `f(x) = ∑ F_k δ(x - X_k)`
+    (Note: The spreading operation is typically implemented in the `IBM_Force`
+    module, but it uses the same delta function defined here).
+
+The functions in this module are designed to be highly efficient and scalable,
+making heavy use of JAX's features for vectorization (`vmap`) and multi-device
+parallelization (`pmap`) to handle large numbers of Lagrangian markers.
 """
+
 from typing import Callable
 import jax
 import jax.numpy as jnp
