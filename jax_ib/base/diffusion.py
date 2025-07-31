@@ -174,16 +174,19 @@ def solve_cg(
       # conditions during the Laplacian calculation.
       u_new_var = grids.GridVariable(u_new_data, u.bc)
       # Calculate A*u_new = u_new - dt*ν*laplacian(u_new).
-      return u_new_var.array.data - dt * nu * fd.laplacian(u_new_var).data
-
-    # Use JAX's built-in conjugate gradient solver.
-    # It solves `linear_op(x) = b` for `x`.
-    # `b` is the RHS, which is the velocity at the current time step (`u.array`).
-    # `x0` is the initial guess, which is also set to the current velocity.
-    x, _ = jax.scipy.sparse.linalg.cg(
-        linear_op, u.array.data, x0=u.array.data, tol=rtol, atol=atol, maxiter=maxiter)
-    return grids.GridArray(x, u.offset, u.grid)
-
+      return u_new_var.array - dt * nu * fd.laplacian(u_new_var)
+    
+    def cg(b: GridArray, x0: GridArray) -> GridArray:
+      """Iteratively solves Lx = b. with initial guess x0."""
+      # Use JAX's built-in conjugate gradient solver.
+      # It solves `linear_op(x) = b` for `x`.
+      # `b` is the RHS, which is the velocity at the current time step (`u.array`).
+      # `x0` is the initial guess, which is also set to the current velocity.
+      x, _ = jax.scipy.sparse.linalg.cg(
+          linear_op, b, x0=x0, tol=rtol, atol=atol, maxiter=maxiter)
+      return x        
+        
+    return cg(u.array, u.array)
   # Apply the solver independently to each component of the velocity vector `v`.
   return tuple(grids.GridVariable(solve_component(u), u.bc) for u in v)
 
