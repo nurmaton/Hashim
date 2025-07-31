@@ -200,7 +200,7 @@ class All_Variables:
 
     def tree_flatten(self):
       """Flattens the entire simulation state into a tuple of children."""
-      children = (self.particles, self.velocity, self.pressure, self.Drag, self.Step_count, self.MD_var)
+      children = (self.particles, self.velocity, self.pressure, self.Drag, self.Step_count, self.MD_var, )
       aux_data = None
       return children, aux_data
 
