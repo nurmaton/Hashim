@@ -15,21 +15,30 @@
 Functions for pressure projection and solving the Poisson equation for pressure.
 
 In an incompressible fluid, the velocity field `v` must be "divergence-free"
-(i.e., `∇ ⋅ v = 0`). This constraint means that the net flow of fluid into any
-small volume must equal the net flow out of it.
+(i.e., `∇ ⋅ v = 0`). This mathematical constraint ensures that mass is conserved;
+the net flow of fluid into any small volume must equal the net flow out.
 
-This module implements the "pressure projection" method to enforce this constraint.
-The method consists of two main steps:
-1.  **Solve the Pressure Poisson Equation**: A Poisson equation, `∇²p = ∇ ⋅ v*`,
-    is solved for the pressure field `p`. Here, `v*` is an intermediate
-    velocity field that is not yet divergence-free. The right-hand-side (RHS),
-    `∇ ⋅ v*`, represents the amount of "compressibility" that needs to be removed.
-2.  **Correct the Velocity**: The velocity field is corrected by subtracting the
-    gradient of the pressure, `v_new = v* - ∇p`. This correction term ensures
-    that the final velocity field `v_new` is divergence-free.
+This module implements the **pressure projection** method, a standard algorithm
+to enforce this constraint at each time step. The method consists of two main stages:
 
-This module provides several specialized functions to solve the Poisson equation
-efficiently for different types of boundary conditions.
+1.  **Solve the Pressure Poisson Equation**: After an initial "predictor" step,
+    the velocity field `v*` is generally not divergence-free. A Poisson equation,
+    `∇²q = ∇ ⋅ v*`, is solved for a pressure-like correction field `q`. The
+    right-hand-side (RHS), `∇ ⋅ v*`, represents the amount of "compressibility"
+    that needs to be projected out.
+
+2.  **Correct the Velocity**: The velocity field is then corrected by subtracting
+    the gradient of `q`, `v_new = v* - ∇q`. This correction ensures that the
+    final velocity field `v_new` is divergence-free.
+
+This module provides `projection_and_update_pressure` as the main high-level
+function to perform this entire process. It also offers several specialized
+low-level functions to solve the Poisson equation itself, each optimized for
+different types of boundary conditions:
+-   `solve_fast_diag`: For fully periodic domains, using a highly efficient FFT-based method.
+-   `solve_fast_diag_moving_wall`: For channel flows (periodic in one direction, Neumann in another).
+-   `solve_fast_diag_Far_Field`: The most general solver, handling arbitrary
+    combinations of Dirichlet and Neumann boundary conditions.
 """
 
 from typing import Callable, Optional
