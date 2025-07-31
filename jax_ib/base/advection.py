@@ -14,16 +14,33 @@
 """
 Module for calculating the advection term of the Navier-Stokes equations.
 
-Advection (or convection) describes the transport of a quantity, such as heat
-or momentum, by the bulk motion of the fluid. This module implements the term
-`-(v ⋅ ∇)c`, where `v` is the velocity field and `c` is the quantity being
-transported.
+Advection (or convection) describes the transport of a quantity (like momentum
+or a scalar concentration) by the bulk motion of the fluid. This module provides
+several numerical methods to compute this transport, primarily implementing the
+term `-(v ⋅ ∇)c`, where `v` is the velocity and `c` is the advected quantity.
 
-The primary approach used is a finite volume method, where the advection is
-computed as the negative divergence of a flux (`-∇ ⋅ (vc)`). Different functions
-in this module use different interpolation schemes (e.g., linear, upwind,
-Van-Leer) to estimate the value of `c` at the control volume faces, leading to
-schemes with varying accuracy and stability properties.
+The methods implemented fall into two main categories:
+
+1.  **Eulerian Finite Volume Methods**: These methods compute the advection term
+    as the negative divergence of a flux (`-∇ ⋅ (vc)`). They are implemented
+    in a modular framework (`advect_general`) where the numerical properties of
+    the scheme are determined by the choice of interpolation function used to
+    estimate values at control volume faces. The available schemes include:
+    -   `advect_linear`: A standard 2nd-order central-difference scheme.
+    -   `advect_upwind`: A robust but diffusive 1st-order upwind scheme.
+    -   `advect_van_leer`: A high-resolution, non-oscillatory (TVD) scheme that
+        uses a flux limiter to achieve 2nd-order accuracy in smooth regions while
+        maintaining stability at sharp gradients.
+
+2.  **Semi-Lagrangian Method (`advect_step_semilagrangian`)**: This is a distinct
+    approach that calculates the advected field at the next time step, `c(t+dt)`.
+    It works by tracing grid points backward in time along velocity streamlines
+    to a "departure point" and interpolating the value from that point. This
+    method is unconditionally stable but can be more diffusive.
+
+The module also provides an optimized `convect_linear` function specifically for
+the self-advection of the velocity field, `-(v ⋅ ∇)v`, which is the nonlinear
+convection term in the momentum equation.
 """
 
 from typing import Optional, Tuple
