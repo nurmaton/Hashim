@@ -72,7 +72,7 @@ GridVariableVector = grids.GridVariableVector
 # variable to interpolate, a target offset, an optional velocity field, and an
 # optional time step, and returns the interpolated variable.
 InterpolationFn = Callable[
-    [GridVariable, Tuple[float, ...], GridVariableVector, Optional[float]],
+    [GridVariable, Tuple[float, ...], GridVariableVector, float],
     GridVariable]
 # A flux limiter is a function that takes a ratio of gradients and returns a weight.
 FluxLimiter = Callable[[grids.Array], grids.Array]
@@ -252,9 +252,9 @@ def upwind(
   # `grids.applied` wraps `jnp.where` to work with GridArrays.
   array_data = grids.applied(jnp.where)(
       u.array > 0,  # Condition: where is the velocity positive?
-      c.shift(floor, axis),  # Value if True: take data from the `floor` neighbor.
-      c.shift(ceil, axis)    # Value if False: take data from the `ceil` neighbor.
-  ).data
+      c.shift(floor, axis).data,  # Value if True: take data from the `floor` neighbor.
+      c.shift(ceil, axis).data    # Value if False: take data from the `ceil` neighbor.
+  )
   
   # Ensure the grid information is consistent.
   grid = grids.consistent_grid(c, u)
@@ -468,8 +468,8 @@ def apply_tvd_limiter(
                                     'interpolation to control volume faces.')
                                     
         # Step 1: Compute the interpolated values using both the low- and high-order schemes.
-        c_low = upwind(c, interpolation_offset, v, dt)
-        c_high = interpolation_fn(c, interpolation_offset, v, dt)
+        c_low = upwind(c, offset, v, dt)
+        c_high = interpolation_fn(c, offset, v, dt)
 
         # Step 2: Compute the ratio of consecutive gradients, `r`, which is the
         # input to the limiter function. This requires a stencil of several points.
@@ -500,11 +500,11 @@ def apply_tvd_limiter(
         # Step 5: Compute the final TVD interpolated value by blending the low and high results.
         # NOTE: There appears to be a sign error here. The standard formula is
         # `c_low + phi * (c_high - c_low)`. The code has a minus sign.
-        c_interpolated_data = c_low.array.data - (c_low.array.data - c_high.array.data) * phi.data
+        c_interpolated_data = c_low.array - (c_low.array - c_high.array) * phi
         
         # Update `c` for the next iteration of the loop (for the next dimension).
         c = grids.GridVariable(
-            grids.GridArray(c_interpolated_data, interpolation_offset, c.grid),
+            grids.GridArray(c_interpolated_data.data, interpolation_offset, c.grid),
             c.bc)
             
     # Return the final interpolated variable after processing all necessary axes.
