@@ -307,7 +307,7 @@ class ConstantBoundaryConditions(BoundaryConditions):
         # This is implemented by combining `mode='constant'` (for the `2*u_bc` part)
         # and `mode='symmetric'` (for the `-u_interior` part).
         data = (2 * jnp.pad(
-            data, full_padding, mode='constant', constant_values=self.bc_values[axis][padding[1]>0])
+            data, full_padding, mode='constant', constant_values=self.bc_values)
                 - jnp.pad(data, full_padding, mode='symmetric'))
                 
       # Case 2: Data is at cell faces/edges (offset is integer).
@@ -342,14 +342,22 @@ class ConstantBoundaryConditions(BoundaryConditions):
                 data,
                 full_padding,
                 mode='constant',
-                constant_values=self.bc_values[axis][padding[1]>0])
+                constant_values=self.bc_values)
           # Padding more than one ghost cell is a more complex reflection.
           elif abs(width) > 1:
             # This logic reflects the data around the explicitly added boundary value.
             bc_padding, _, _ = make_padding(int(np.sign(width)))
             full_padding_past_bc, _, _ = make_padding(width - int(np.sign(width)))
-            expanded_data = jnp.pad(data, bc_padding, mode='constant', constant_values=self.bc_values[axis][padding[1]>0])
-            data = jnp.pad(expanded_data, full_padding_past_bc, mode='reflect')
+            expanded_data = jnp.pad(
+                data, bc_padding, mode='constant', constant_values=(0, 0))
+            padding_values = list(self.bc_values)
+            padding_values[axis] = [pad / 2 for pad in padding_values[axis]]
+            data = 2 * jnp.pad(
+                data,
+                full_padding,
+                mode='constant',
+                constant_values=tuple(padding_values)) - jnp.pad(
+                    expanded_data, full_padding_past_bc, mode='reflect')
         else:
           # If the array already contains the boundary value, we use a different
           # reflection formula similar to the cell-centered case.
@@ -406,7 +414,7 @@ class ConstantBoundaryConditions(BoundaryConditions):
                 data,
                 full_padding,
                 mode='constant',
-                constant_values=self.bc_values[axis][padding[1]>0]))
+                constant_values=self.bc_values))
         )
     else:
       # If the `bc_type` is not one of the recognized types, raise an error.
@@ -546,7 +554,7 @@ class ConstantBoundaryConditions(BoundaryConditions):
     # `self.bc_values[axis][-i]` with `i=0` and `i=1` is a way to access
     # the (upper, lower) values in reverse order.
     bc_value_arrays = tuple(
-        jnp.full(face_shape, self.bc_values[axis][i])
+        jnp.full(face_shape, self.bc_values[axis][-i])
         for i in [0, 1]) # i=0 for lower, i=1 for upper
         
     return bc_value_arrays
@@ -764,7 +772,7 @@ class TimeDependentBoundaryConditions(ConstantBoundaryConditions):
     #values = ((0.0, 0.0),) * ndim
     
     # Call the parent class's initializer.
-    super(TimeDependentBoundaryConditions, self).__init__(time_stamp, values, types, boundary_fn)
+    super(TimeDependentBoundaryConditions, self).__init__(types, values, boundary_fn, time_stamp)
 
   def tree_flatten(self):
     """
@@ -869,7 +877,10 @@ def Reserve_BC(
     v_updated =  tuple(grids.GridVariable(u.array, bc) for u, bc in zip(v, vel_bc))
     
     # Return a new `All_Variables` object containing the updated velocity variables.
-    return particle_class.All_Variables(particles, v_updated, pressure, Drag, Step_count, MD_var)
+    # return particle_class.All_Variables(particles, v_updated, pressure, Drag, Step_count, MD_var)
+    # --- MODIFIED FUNCTIONS TO FIX THE BUGS ---
+    return all_variable
+  
   
 def update_BC(
     all_variable: particle_class.All_Variables,
@@ -919,7 +930,9 @@ def update_BC(
     v_updated =  tuple(grids.GridVariable(u.array, bc) for u, bc in zip(v, vel_bc))
     
     # Return the new state.
-    return particle_class.All_Variables(particles, v_updated, pressure, Drag, Step_count, MD_var)
+    # return particle_class.All_Variables(particles, v_updated, pressure, Drag, Step_count, MD_var)
+    # --- MODIFIED FUNCTIONS TO FIX THE BUGS ---
+    return all_variable
 
 # --- Convenience Utilities / Factory Functions ---
 # These functions provide simple, readable ways to create common types of boundary conditions.
