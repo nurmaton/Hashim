@@ -14,12 +14,31 @@
 """
 Utility methods for manipulating array-like objects and JAX PyTrees.
 
-This module provides a collection of helper functions that perform common array
-operations. These include basic manipulations like slicing and concatenating,
-as well as more specialized numerical building blocks like functions to create
-Laplacian operator matrices and perform 1D interpolation. These utilities are
-designed to work with JAX PyTrees, allowing them to operate on complex nested
-data structures containing JAX arrays, not just single arrays.
+This module provides a collection of helper functions for common and specialized
+array operations required throughout the fluid dynamics solver. These utilities
+are designed to work with JAX PyTrees, allowing them to operate transparently
+on complex, nested data structures like velocity vectors, not just single arrays.
+
+The functionalities provided can be categorized as:
+
+1.  **PyTree Slicing and Dicing**: Functions like `slice_along_axis`,
+    `split_along_axis`, and `concat_along_axis` provide the ability to
+    manipulate entire physical fields. For example, one could use these to
+    extract a boundary layer from a velocity field or to stitch together
+    subdomains for parallel processing.
+
+2.  **Matrix-based Operator Construction**: Functions like `laplacian_matrix`
+    and `laplacian_matrix_w_boundaries` are fundamental building blocks for
+    matrix-based (fast diagonalization) Poisson solvers. They construct the
+    explicit matrix representation of the Laplacian operator, correctly
+    modified to enforce various physical boundary conditions (Periodic,
+    Dirichlet, Neumann).
+
+3.  **Numerical Primitives**: Includes specialized functions like `block_reduce`
+    for coarse-graining data, `gram_schmidt_qr` for matrix orthogonalization
+    tasks, and a JAX-native `interp1d` for 1D linear interpolation, which is
+    essential for tasks like interpolating forces or velocities onto Lagrangian
+    markers.
 """
 
 from typing import Any, Callable, List, Tuple, Union
