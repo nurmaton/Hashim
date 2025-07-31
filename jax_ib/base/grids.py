@@ -291,7 +291,7 @@ class GridArrayTensor(np.ndarray):
   def __new__(cls, arrays):
     # This creates a NumPy array with `dtype=object` to hold the GridArray
     # objects, and then casts the array's view to this `GridArrayTensor` class type.
-    return np.asarray(arrays, dtype=object).view(cls)
+    return np.asarray(arrays).view(cls)
 
 
 # Register GridArrayTensor as a JAX PyTree so it can be used in jitted functions.
@@ -357,7 +357,8 @@ class BoundaryConditions:
     raise NotImplementedError(
         'shift() must be implemented in a BoundaryConditions subclass.')
 
-  def values(self, axis: int, grid: Grid) -> Tuple[Optional[Array], Optional[Array]]:
+  def values(self, axis: int, grid: Grid, offset: Optional[Tuple[float, ...]],
+             time: Optional[float]) -> Tuple[Optional[Array], Optional[Array]]:
     """
     Returns the boundary values as arrays defined on the grid faces.
 
@@ -420,6 +421,28 @@ class BoundaryConditions:
     # This base class provides the interface but not the implementation.
     raise NotImplementedError(
         'trim_boundary() must be implemented in a BoundaryConditions subclass.')
+  
+  def pad_and_impose_bc(
+      self,
+      u: GridArray,
+      offset_to_pad_to: Optional[Tuple[float, ...]] = None) -> GridVariable:
+    """Returns GridVariable with correct boundary condition.
+
+    Some grid points of GridArray might coincide with boundary. This ensures
+    that the GridVariable.array agrees with GridVariable.bc.
+    Args:
+      u: a `GridArray` object that specifies only scalar values on the internal
+        nodes.
+      offset_to_pad_to: a Tuple of desired offset to pad to. Note that if the
+        function is given just an interior array in dirichlet case, it can pad
+        to both 0 offset and 1 offset.
+
+    Returns:
+      A GridVariable that has correct boundary.
+    """
+    raise NotImplementedError(
+        'pad_and_impose_bc() not implemented in BoundaryConditions base class.')
+  
 
   def impose_bc(self, u: GridArray) -> GridVariable:
     """
@@ -564,7 +587,8 @@ class GridVariable:
     shape = list(grid.shape)
     for axis in range(self.grid.ndim):
       # Periodic boundaries are all considered "interior".
-      if self.bc.types[axis][0] == 'periodic':
+      # if self.bc.types[axis][1] == 'periodic':
+      if self.bc.types[axis][0] == 'periodic':        
         continue
       # For Dirichlet/Neumann boundaries, if the variable lies on a cell face
       # (offset 0.0 or 1.0), the grid size is reduced by one.
@@ -575,7 +599,7 @@ class GridVariable:
         shape[axis] -= 1
         domain[axis] = (domain[axis][0] + grid.step[axis], domain[axis][1])
     # Return a new Grid object with the adjusted shape and domain.
-    return Grid(tuple(shape), domain=tuple(domain))
+    return Grid(shape, domain=tuple(domain))
 
   def trim_boundary(self) -> GridArray:
     """
@@ -978,7 +1002,8 @@ def domain_interior_masks(grid: Grid) -> Tuple[np.ndarray, ...]:
     mesh = grid.mesh(offset)
     
     # Initialize the mask for this face direction to all ones (assuming all are interior).
-    mask = np.ones(grid.shape, dtype=int)
+    # mask = np.ones(grid.shape, dtype=int)
+    mask = 1
     
     # Iterate through each dimension (x, y, ...) of the grid.
     for i, x_coords in enumerate(mesh):
