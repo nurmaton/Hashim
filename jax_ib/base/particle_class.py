@@ -14,11 +14,24 @@
 """
 Defines the data structures for representing particles in the simulation.
 
-This module contains the core classes for managing the state of dynamic,
-deformable particles. The classes are designed as JAX PyTrees, which allows them
-to be seamlessly integrated into JAX's compiled and auto-differentiable
-workflows (`jit`, `vmap`, `scan`, etc.). This is a fundamental change from the
-previous version, which was designed for pre-determined kinematic motion.
+This module contains the core data classes for managing the state of dynamic,
+deformable particles. These classes are fundamental to the shift from a
+kinematically-driven simulation (where motion is prescribed) to a fully
+dynamic, physics-based Fluid-Structure Interaction (FSI) simulation where the
+particle's motion is an outcome of the forces acting on it.
+
+The physical model is based on the "penalty IBM" method described by Sustiel &
+Grier, which uses two sets of Lagrangian markers:
+-   **Mass-carrying markers (`Ym_x`, `Ym_y`)**: These hold the particle's inertia
+    and are evolved by a Molecular Dynamics-style integrator.
+-   **Fluid-interacting markers (`xp`, `yp`)**: These are massless points that
+    define the boundary and are subject to penalty and fluid forces.
+
+A key feature of this module is that all data containers (`particle`,
+`particle_lista`, `All_Variables`) are registered as **JAX PyTrees**. This is
+what allows the complex, nested state of the simulation to be passed into JAX's
+high-performance transformations (`jit`, `vmap`, `scan`, `grad`), enabling an
+efficient and fully differentiable simulation pipeline.
 """
 
 import dataclasses
