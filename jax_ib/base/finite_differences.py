@@ -269,10 +269,11 @@ def laplacian(u: GridVariable) -> GridArray:
   for axis in range(u.grid.ndim):
     # This computes `(u(i-1) + u(i+1)) / dx²` for the current axis.
     # `stencil_sum` is used to combine the shifted arrays.
-    result += stencil_sum(u.shift(-1, axis), u.shift(+1, axis)).data * scales[axis]
+    result += stencil_sum(u.shift(-1, axis), u.shift(+1, axis)) * scales[axis]
     
   # Wrap the raw result array in a GridArray, preserving the original offset and grid info.
-  return grids.GridArray(result, u.offset, u.grid)
+  # return grids.GridArray(result, u.offset, u.grid)
+  return result  
 
 
 def divergence(v: Sequence[GridVariable]) -> GridArray:
@@ -373,8 +374,8 @@ def gradient_tensor(v):
   """
   # If the input `v` is a sequence (i.e., a vector field), recursively call this
   # function on each component and stack the resulting gradient vectors into a tensor.
-  if not isinstance(v, grids.GridVariable):
-    return grids.GridArrayTensor(np.stack([gradient_tensor(u) for u in v], axis=-1))
+  if not isinstance(v, GridVariable):
+    return GridArrayTensor(np.stack([gradient_tensor(u) for u in v], axis=-1))
     
   # If the input is a single GridVariable (a scalar field), compute its gradient vector.
   grad = []
@@ -391,13 +392,15 @@ def gradient_tensor(v):
     elif np.isclose(offset, 0.5):
       # Data is already centered in this dimension, use a central difference.
       # No need to interpolate first, central_difference is already centered.
-      derivative = central_difference(v, axis)
+      # derivative = central_difference(v, axis)
+      v_centered = interpolation.linear(v, v.grid.cell_center)
+      derivative = central_difference(v_centered, axis)
     else:
       raise ValueError(f'expected offset values in {{0, 0.5, 1}}, got {offset}')
     grad.append(derivative)
     
   # Return the list of gradient components as a GridArrayTensor.
-  return grids.GridArrayTensor(grad)
+  return GridArrayTensor(grad)
 
 
 def curl_2d(v: Sequence[GridVariable]) -> GridArray:
