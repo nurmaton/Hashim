@@ -217,7 +217,7 @@ def split_axis(
   return tuple(jax.tree_unflatten(tree_def, leaves) for leaves in splits)
 
 
-def concat_along_axis(pytrees: Tuple[PyTree, ...], axis: int) -> PyTree:
+def concat_along_axis(pytrees, axis):
   """
   Concatenates a sequence of PyTrees along a specified axis.
 
@@ -472,7 +472,7 @@ def laplacian_matrix_w_boundaries(
   return laplacians
 
 
-def unstack(array: Array, axis: int) -> Tuple[Array, ...]:
+def unstack(array, axis):
   """
   Splits an array into a tuple of slices along a given axis, removing the split dimension.
   
@@ -522,7 +522,7 @@ def gram_schmidt_qr(
     triangular matrix.
   """
 
-  def orthogonalize(vector: Array, others: list[Array]) -> Array:
+  def orthogonalize(vector, others):
     """
     Orthogonalizes a `vector` with respect to a list of already orthogonal `others`.
     This is the core step of the Gram-Schmidt process.
