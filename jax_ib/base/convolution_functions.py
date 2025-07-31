@@ -44,7 +44,7 @@ import jax
 import jax.numpy as jnp
 
 
-def delta_approx_logistjax(x: jnp.ndarray, x0: float, w: float) -> jnp.ndarray:
+def delta_approx_logistjax(x,x0,w):
     """
     A smoothed, differentiable approximation of the 1D Dirac delta function.
 
