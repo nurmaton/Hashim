@@ -12,18 +12,34 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Assembles the components of the Navier-Stokes equations into a time-stepping function.
+Assembles the components of the Navier-Stokes equations into a complete
+time-stepping function for Fluid-Structure Interaction (FSI) simulations.
 
 This module provides high-level "factory" functions that construct a complete
-stepper for the incompressible Navier-Stokes equations. It combines various
-physical terms (advection, diffusion, forcing) and numerical procedures
-(pressure projection, time integration) into a single callable function that
-advances the simulation state by one time step.
+stepper for solving the incompressible Navier-Stokes equations coupled with an
+immersed, deformable body. It combines various physical terms (advection,
+diffusion), numerical procedures (pressure projection), and specialized FSI
+components (IBM forcing, particle motion) into a single, callable function
+that advances the entire simulation state by one time step.
 
 The primary function, `semi_implicit_navier_stokes_timeBC`, builds a solver
-that uses a semi-implicit time-stepping scheme. This means that some terms
-(like advection) are treated explicitly, while others (like pressure) are
-treated implicitly, which is a common and robust approach for fluid simulation.
+that uses a semi-implicit projection method, a robust and standard algorithm
+for FSI, which proceeds in the following sequence:
+
+1.  **Explicit Step**: An intermediate fluid velocity is computed by advancing
+    the standard advection and diffusion terms explicitly in time.
+2.  **IBM Forcing**: The physical forces from the immersed boundary (e.g.,
+    elasticity, surface tension) are calculated and "spread" to the fluid grid.
+3.  **Pressure Projection**: A Poisson equation is solved for the pressure field
+    required to enforce the incompressibility constraint on the velocity field.
+4.  **Velocity Correction**: The intermediate velocity is corrected with the
+    pressure gradient to yield a final, divergence-free velocity field.
+5.  **Particle Motion**: The final fluid velocity is interpolated back to the
+    immersed boundary to update its position for the next time step.
+
+The use of a factory pattern allows for great flexibility, enabling users to
+easily swap out different numerical methods (e.g., different advection schemes,
+pressure solvers, or time integrators) to configure the solver.
 """
 
 import functools
