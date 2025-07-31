@@ -15,11 +15,36 @@
 Classes that specify how boundary conditions are applied to arrays.
 
 This module provides the core data structures and logic for defining and applying
-boundary conditions (BCs) to the physical fields in the simulation. In finite
-difference/volume methods, values must be defined in "ghost cells" just outside
-the computational domain to correctly calculate derivatives at the boundaries.
-This module implements the logic for filling those ghost cells according to
-different physical conditions.
+boundary conditions (BCs). In finite difference/volume methods, derivatives at
+the domain edge require knowledge of values in "ghost cells" located just
+outside the physical domain. This module implements the logic for filling those
+ghost cells according to different physical conditions.
+
+The main components are:
+
+-   `ConstantBoundaryConditions`: The primary class that implements the `.shift()`
+    and `.pad()` methods. It contains the detailed logic for filling ghost cells
+    for PERIODIC, DIRICHLET (fixed value), and NEUMANN (fixed gradient) conditions.
+    It is also a JAX PyTree, making it compatible with `jit` and `grad`.
+
+-   **Factory Functions**: A set of convenience functions (e.g.,
+    `periodic_boundary_conditions`, `channel_flow_boundary_conditions`) that
+    simplify the creation of common BC configurations.
+
+-   **Boundary Condition Inference**: Utility functions like
+    `get_pressure_bc_from_velocity` that enforce physical laws by deriving the
+    correct BCs for one field (e.g., pressure) based on another (e.g., velocity).
+
+**Key Changes for the Deformable Body Simulation:**
+This module was significantly updated from the version used for kinematically-driven
+rigid bodies.
+1.  The `update_BC` and `Reserve_BC` functions, which were designed for
+    time-varying *domain boundaries*, are now simple pass-through functions. This
+    correctly reflects the physics of the deformable body problem, where the
+    *domain* is static, and the action happens *inside* it.
+2.  A critical bug in `get_pressure_bc_from_velocity` was fixed to ensure that
+    the PyTree structure of the boundary condition object remains stable during a
+    `jax.lax.scan` loop, which is essential for JAX's compilation model.
 """
 
 import dataclasses
