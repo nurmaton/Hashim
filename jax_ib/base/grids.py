@@ -16,18 +16,36 @@ Core data structures for staggered grids and the variables defined on them.
 
 This module provides the fundamental classes for representing the discretized
 computational domain and the physical quantities (like velocity and pressure)
-that are defined on that domain. The key concepts are:
+that are defined on that domain. These structures are essential for correctly
+implementing finite difference and finite volume methods, especially on a
+**staggered grid** where different variables are stored at different locations.
 
-- `Grid`: Describes the physical size, shape, and resolution of the computational
-  domain.
-- `GridArray`: A container that holds a JAX array of data and annotates it with
-  its physical location (offset) on a `Grid`. This is the basic building block.
-- `BoundaryConditions`: An abstract base class for defining how to handle values
-  at the edges of the domain.
-- `GridVariable`: The most important high-level class. It bundles a `GridArray`
-  with a `BoundaryConditions` object, creating a self-contained representation
-  of a physical field. This is the primary data type used by the physics solvers.
+The main data structures form a hierarchy:
+
+- `Grid`: A simple, immutable class that describes the physical size, shape,
+  and resolution of the entire computational domain.
+
+- `GridArray`: The primary container for numerical data. It bundles a JAX array
+  with metadata describing its physical location (the `offset`) on a `Grid`.
+  The `offset` is crucial; for example, a pressure field at the cell center
+  would have `offset=(0.5, 0.5)`, while an x-velocity component on the cell's
+  right face would have `offset=(1.0, 0.5)`. Arithmetic operations on
+  `GridArray` objects are well-defined and preserve this metadata.
+
+- `GridVariable`: The highest-level class, representing a complete physical
+  field. It combines a `GridArray` (data and location) with a
+  `BoundaryConditions` object. This creates a self-contained variable that
+  "knows" how to behave at the domain edges, which is essential for derivative
+  calculations. Most of the physics modules operate on `GridVariable` objects.
+
+- `GridArrayTensor`: A specialized numpy array for holding `GridArray` objects,
+  allowing for convenient tensor algebra on fields like the velocity gradient.
+
+By encapsulating the grid layout and boundary condition logic within these
+classes, the rest of the solver can perform complex calculations while remaining
+agnostic to the specific details of the grid staggering.
 """
+
 # This import allows a class to use its own name in type hints before it is fully defined.
 from __future__ import annotations
 
