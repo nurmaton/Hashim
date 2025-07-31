@@ -828,57 +828,62 @@ def Reserve_BC(
     step_time: float
 ) -> particle_class.All_Variables:
     """
-    Updates the boundary conditions for the velocity field based on their `boundary_fn`.
-    
-    NOTE: In the refactored new code, this function and `update_BC` have been
-    replaced by simple pass-through functions, making this implementation effectively
-    obsolete for the main dynamic solver. It is kept here for context.
+    Updates boundary conditions for time-dependent domain walls.
 
-    This function's name is slightly misleading; it appears to be a specific type
-    of BC update, perhaps for resetting or "reserving" certain values while
-    updating others. It constructs new `ConstantBoundaryConditions` objects for
-    the velocity field with updated `bc_values` and `time_stamp`.
+    WHY THIS FUNCTION IS NOW A PASS-THROUGH FOR THE DEFORMABLE PROBLEM:
+    This function was originally designed for simulations where the physical
+    boundaries of the simulation box itself were in motion (e.g., a lid-driven
+    cavity with an oscillating lid). In that scenario, the velocity of the
+    domain walls needs to be recalculated and updated at every single time step.
 
-    Args:
-      all_variable: The complete current state of the simulation.
-      step_time: The time step size, `dt`.
+    However, in the deformable flapping simulation, the physics are different:
+    - The ACTION is happening with the particle *inside* the domain.
+    - The outer boundaries of the simulation box are STATIC (e.g., periodic or
+      far-field boundaries with a constant velocity of zero).
 
-    Returns:
-      A new `All_Variables` object with updated boundary conditions for the velocity.
+    Since the domain's boundary conditions are constant and do not change with
+    time, there is no need to perform a complex update at every step. This
+    function's logic is therefore obsolete for this specific problem.
+    The new implementation is a simple pass-through (`return all_variable`)
+    which is both more computationally efficient and a more accurate
+    representation of the static-boundary physics.
     """
-    # Unpack the current simulation state.
-    v = all_variable.velocity
-    particles = all_variable.particles
-    pressure = all_variable.pressure
-    Drag = all_variable.Drag
-    Step_count = all_variable.Step_count
-    MD_var = all_variable.MD_var
+    # The original implementation for time-dependent domain boundaries is commented out below.
+    # # Unpack the current simulation state.
+    # v = all_variable.velocity
+    # particles = all_variable.particles
+    # pressure = all_variable.pressure
+    # Drag = all_variable.Drag
+    # Step_count = all_variable.Step_count
+    # MD_var = all_variable.MD_var
     
-    # Get the boundary function objects for each velocity component.
-    bcfn_x = v[0].bc.boundary_fn
-    bcfn_y = v[1].bc.boundary_fn
+    # # Get the boundary function objects for each velocity component.
+    # bcfn_x = v[0].bc.boundary_fn
+    # bcfn_y = v[1].bc.boundary_fn
     
-    # Update the time stamp.
-    dt = step_time
-    ts = v[0].bc.time_stamp + dt
+    # # Update the time stamp.
+    # dt = step_time
+    # ts = v[0].bc.time_stamp + dt
     
-    # Calculate the new boundary values by calling the boundary functions.
-    # Note the mix of dynamic and static values: `(bcfn[0](ts), bcfn[1](0.0))` suggests
-    # some boundary values are updated with the new time, while others are held constant.
-    vx_bc = ((bcfn_x[0](ts), bcfn_x[1](0.0)), (bcfn_x[2](ts), bcfn_x[3](0.0)))
-    vy_bc = ((bcfn_y[0](ts), bcfn_y[1](0.0)), (bcfn_y[2](ts), bcfn_y[3](0.0)))
+    # # Calculate the new boundary values by calling the boundary functions.
+    # # Note the mix of dynamic and static values: `(bcfn[0](ts), bcfn[1](0.0))` suggests
+    # # some boundary values are updated with the new time, while others are held constant.
+    # vx_bc = ((bcfn_x[0](ts), bcfn_x[1](0.0)), (bcfn_x[2](ts), bcfn_x[3](0.0)))
+    # vy_bc = ((bcfn_y[0](ts), bcfn_y[1](0.0)), (bcfn_y[2](ts), bcfn_y[3](0.0)))
     
-    # Create new `ConstantBoundaryConditions` objects with the updated values.
-    vel_bc = (ConstantBoundaryConditions(values=vx_bc, time_stamp=ts, types=v[0].bc.types, boundary_fn=bcfn_x),
-              ConstantBoundaryConditions(values=vy_bc, time_stamp=ts, types=v[1].bc.types, boundary_fn=bcfn_y))
+    # # Create new `ConstantBoundaryConditions` objects with the updated values.
+    # vel_bc = (ConstantBoundaryConditions(values=vx_bc, time_stamp=ts, types=v[0].bc.types, boundary_fn=bcfn_x),
+    #           ConstantBoundaryConditions(values=vy_bc, time_stamp=ts, types=v[1].bc.types, boundary_fn=bcfn_y))
    
-    # Create new `GridVariable` objects for the velocity components, pairing the
-    # original data arrays with the new boundary condition objects.
-    v_updated =  tuple(grids.GridVariable(u.array, bc) for u, bc in zip(v, vel_bc))
+    # # Create new `GridVariable` objects for the velocity components, pairing the
+    # # original data arrays with the new boundary condition objects.
+    # v_updated =  tuple(grids.GridVariable(u.array, bc) for u, bc in zip(v, vel_bc))
     
-    # Return a new `All_Variables` object containing the updated velocity variables.
+    # # Return a new `All_Variables` object containing the updated velocity variables.
     # return particle_class.All_Variables(particles, v_updated, pressure, Drag, Step_count, MD_var)
-    # --- MODIFIED FUNCTIONS TO FIX THE BUGS ---
+    
+    # --- NEW IMPLEMENTATION FOR STATIC BOUNDARIES ---
+    # For the deformable problem with static outer walls, this function does nothing.
     return all_variable
   
   
@@ -889,49 +894,51 @@ def update_BC(
     """
     Updates all time-dependent boundary conditions for the velocity field.
 
-    NOTE: This function is also obsolete in the newest version of the code, having
-    been replaced by a simple pass-through.
+    WHY THIS FUNCTION IS NOW A PASS-THROUGH FOR THE DEFORMABLE PROBLEM:
+    Similar to `Reserve_BC`, this function's original purpose was to handle
+    simulations with actively moving domain boundaries by re-evaluating the
+    wall velocities at every time step.
 
-    This function is similar to `Reserve_BC` but appears to be a more general
-    update where all boundary values are evaluated at the new time stamp `ts`.
-
-    Args:
-      all_variable: The complete current state of the simulation.
-      step_time: The time step size, `dt`.
-
-    Returns:
-      A new `All_Variables` object with updated boundary conditions for the velocity.
+    For the deformable flapping problem, the outer boundaries are fixed and
+    unchanging. Therefore, performing this update is unnecessary and computationally
+    wasteful. The correct implementation for this physical setup is to simply
+    pass the state through unchanged, as the boundary conditions are constant
+    throughout the entire simulation. This satisfies the API required by the
+    time-stepper while correctly reflecting the static-boundary physics.
     """
-    # Unpack the state.
-    v = all_variable.velocity
-    particles = all_variable.particles
-    pressure = all_variable.pressure
-    Drag = all_variable.Drag
-    Step_count = all_variable.Step_count
-    MD_var = all_variable.MD_var
+    # The original implementation for time-dependent domain boundaries is commented out below.
+    # # Unpack the state.
+    # v = all_variable.velocity
+    # particles = all_variable.particles
+    # pressure = all_variable.pressure
+    # Drag = all_variable.Drag
+    # Step_count = all_variable.Step_count
+    # MD_var = all_variable.MD_var
     
-    # Get the boundary functions.
-    bcfn_x = v[0].bc.boundary_fn
-    bcfn_y = v[1].bc.boundary_fn
+    # # Get the boundary functions.
+    # bcfn_x = v[0].bc.boundary_fn
+    # bcfn_y = v[1].bc.boundary_fn
     
-    # Update the time stamp.
-    dt = step_time
-    ts = v[0].bc.time_stamp + dt
+    # # Update the time stamp.
+    # dt = step_time
+    # ts = v[0].bc.time_stamp + dt
     
-    # Calculate the new boundary values by calling all boundary functions with the new time `ts`.
-    vx_bc = ((bcfn_x[0](ts), bcfn_x[1](ts)), (bcfn_x[2](ts), bcfn_x[3](ts)))
-    vy_bc = ((bcfn_y[0](ts), bcfn_y[1](ts)), (bcfn_y[2](ts), bcfn_y[3](ts)))
+    # # Calculate the new boundary values by calling all boundary functions with the new time `ts`.
+    # vx_bc = ((bcfn_x[0](ts), bcfn_x[1](ts)), (bcfn_x[2](ts), bcfn_x[3](ts)))
+    # vy_bc = ((bcfn_y[0](ts), bcfn_y[1](ts)), (bcfn_y[2](ts), bcfn_y[3](ts)))
     
-    # Create new BC objects.
-    vel_bc = (ConstantBoundaryConditions(values=vx_bc, time_stamp=ts, types=v[0].bc.types, boundary_fn=bcfn_x),
-              ConstantBoundaryConditions(values=vy_bc, time_stamp=ts, types=v[1].bc.types, boundary_fn=bcfn_y))
+    # # Create new BC objects.
+    # vel_bc = (ConstantBoundaryConditions(values=vx_bc, time_stamp=ts, types=v[0].bc.types, boundary_fn=bcfn_x),
+    #           ConstantBoundaryConditions(values=vy_bc, time_stamp=ts, types=v[1].bc.types, boundary_fn=bcfn_y))
    
-    # Create updated GridVariable objects.
-    v_updated =  tuple(grids.GridVariable(u.array, bc) for u, bc in zip(v, vel_bc))
+    # # Create updated GridVariable objects.
+    # v_updated =  tuple(grids.GridVariable(u.array, bc) for u, bc in zip(v, vel_bc))
     
-    # Return the new state.
+    # # Return the new state.
     # return particle_class.All_Variables(particles, v_updated, pressure, Drag, Step_count, MD_var)
-    # --- MODIFIED FUNCTIONS TO FIX THE BUGS ---
+    
+    # --- NEW IMPLEMENTATION FOR STATIC BOUNDARIES ---
+    # For the deformable problem with static outer walls, this function does nothing.
     return all_variable
 
 # --- Convenience Utilities / Factory Functions ---
