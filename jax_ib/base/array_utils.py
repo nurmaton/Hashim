@@ -275,11 +275,12 @@ def block_reduce(
     
   # Apply the reduction function over the newly created block axes.
   # This nested vmap construction is a functional way to iterate over the blocks.
-  reshaped_array = array.reshape(new_shape)
+  multiple_axis_reduction_fn = reduction_fn
   # The reduction is applied to the axes corresponding to the block dimensions
   # (in the reshaped array, these are axes 1, 3, 5, ...).
-  reduced_axes = tuple(range(1, 2 * array.ndim, 2))
-  return reduction_fn(reshaped_array, axis=reduced_axes)
+  for j in reversed(range(array.ndim)):
+    multiple_axis_reduction_fn = jax.vmap(multiple_axis_reduction_fn, j)
+  return multiple_axis_reduction_fn(array.reshape(new_shape))
 
 
 def laplacian_matrix(size: int, step: float) -> np.ndarray:
@@ -532,7 +533,7 @@ def gram_schmidt_qr(
       
     # The projection of vector `c` onto vector `x` is `dot(c, x) * x`.
     # This lambda function subtracts this projection from `c`.
-    orthogonalize_step = lambda c, x: (c - jnp.dot(c, x) * x, None)
+    orthogonalize_step = lambda c, x: tuple([c - jnp.dot(c, x) * x, None])
     
     # `jax.lax.scan` iteratively applies the `orthogonalize_step` function,
     # subtracting the projection onto each of the `others` vectors sequentially.
@@ -682,7 +683,7 @@ def interp1d(
     # that bracket it.
     
     # Clip `x_new` to the bounds of `x` to prevent `searchsorted` from going out of bounds.
-    x_new_clipped = jnp.clip(x_new, jnp.min(x), jnp.max(x))
+    x_new_clipped = jnp.clip(x_new, np.min(x), np.max(x))
     # `jnp.searchsorted` efficiently finds the insertion index for each `x_new` point
     # in the sorted `x` array. This gives us the index of the point *above* `x_new`.
     above_idx = jnp.minimum(n_x - 1,
@@ -718,15 +719,16 @@ def interp1d(
       y_new = y_below + delta_x * slope
     else:  # The default behavior is to use the provided scalar fill_value.
       delta_x = expand(x_new - x_below)
+      fill_value_ = expand(fill_value)
       y_new = y_below + delta_x * slope
       # Use `jnp.where` to replace any out-of-bounds results with the fill value.
-      is_out_of_bounds = (x_new < jnp.min(x)) | (x_new > jnp.max(x))
-      y_new = jnp.where(expand(is_out_of_bounds), expand(fill_value), y_new)
-      
+      y_new = jnp.where(
+          (delta_x < 0) | (delta_x > expand(x_above - x_below)),
+          fill_value_, y_new)
     # Reshape the result to match the expected output shape, which is a combination
     # of y's shape and x_new's shape.
     return jnp.reshape(
-        y_new, y.shape[:axis] + x_new_shape + y.shape[axis + 1:])
+        y_new, y_new.shape[:axis] + x_new_shape + y_new.shape[axis + 1:])
 
   # Return the callable interpolation function.
   return interp_func
