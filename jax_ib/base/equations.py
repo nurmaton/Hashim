@@ -188,7 +188,7 @@ def navier_stokes_explicit_terms(
 def explicit_Reserve_BC(
     ReserveBC: BCFn ,
     step_time: float,
-) -> Callable[[particle_class.All_Variables], particle_class.All_Variables]:
+) -> Callable[[GridVariableVector], GridVariableVector]:
   """
   A factory function that creates a standardized wrapper for a boundary condition reservation step.
 
@@ -225,7 +225,7 @@ def explicit_Reserve_BC(
 def explicit_update_BC(
     updateBC: BCFn,
     step_time: float,
-) -> Callable[[particle_class.All_Variables], particle_class.All_Variables]:
+) -> Callable[[GridVariableVector], GridVariableVector]:
   """
   A factory function that creates a standardized wrapper for a boundary condition update step.
 
@@ -257,7 +257,7 @@ def explicit_update_BC(
 def explicit_IBM_Force(
     cal_IBM_force: IBMFn,
     step_time: float,
-) -> Callable[[particle_class.All_Variables], GridVariableVector]:
+) -> Callable[[GridVariableVector], GridVariableVector]:
   """
   A factory function that creates a standardized wrapper for the IBM force calculation step.
 
@@ -286,7 +286,7 @@ def explicit_IBM_Force(
 def explicit_Update_position(
     cal_Update_Position: PosFn,
     step_time: float,
-) -> Callable[[particle_class.All_Variables], particle_class.All_Variables]:
+) -> Callable[[GridVariableVector], GridVariableVector]:
   """
   A factory function that creates a standardized wrapper for the particle position update step.
 
@@ -315,7 +315,7 @@ def explicit_Update_position(
 def explicit_Calc_Drag(
     cal_Drag: DragFn,
     step_time: float,
-) -> Callable[[particle_class.All_Variables], particle_class.All_Variables]:
+) -> Callable[[GridVariableVector], GridVariableVector]:
   """
   A factory function that creates a standardized wrapper for a drag calculation/diagnostic step.
 
@@ -378,7 +378,7 @@ def semi_implicit_navier_stokes_timeBC(
     grid: grids.Grid,
     convect: Optional[ConvectFn] = None,
     diffuse: DiffuseFn = diffusion.diffuse,
-    pressure_solve: Callable = pressure.solve_fast_diag,
+    pressure_solve: Callable = pressureCFD.solve_fast_diag,
     forcing: Optional[ForcingFn] = None,
     time_stepper: Callable = time_stepping.forward_euler_updated,
     IBM_forcing: IBMFn=None,
@@ -386,7 +386,7 @@ def semi_implicit_navier_stokes_timeBC(
     Pressure_Grad:GradPFn=finite_differences.forward_difference,
     Drag_fn:DragFn=None,
     
-) -> Callable[[particle_class.All_Variables], particle_class.All_Variables]:
+) -> Callable[[GridVariableVector], GridVariableVector]:
   """
   The main factory function for creating a complete FSI (Fluid-Structure Interaction) solver.
 
@@ -466,10 +466,10 @@ def semi_implicit_navier_stokes_penalty(
     grid: grids.Grid,
     convect: Optional[ConvectFn] = None,
     diffuse: DiffuseFn = diffusion.diffuse,
-    pressure_solve: Callable = pressure.solve_fast_diag,
+    pressure_solve: Callable = pressureCFD.solve_fast_diag,
     forcing: Optional[ForcingFn] = None,
     time_stepper: Callable = time_stepping.forward_euler_penalty,
-) -> Callable[[particle_class.All_Variables], particle_class.All_Variables]:
+) -> Callable[[GridVariableVector], GridVariableVector]:
   """
   Returns a function that performs a time step of Navier-Stokes, simplified for a penalty method.
   
