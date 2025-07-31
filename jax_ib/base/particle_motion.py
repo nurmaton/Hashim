@@ -15,9 +15,26 @@
 Implements the dynamic equations of motion for deformable particles.
 
 This module is responsible for updating the state (positions and velocities) of
-the Lagrangian particles based on the physical forces acting on them and their
-interaction with the fluid. This represents the solid-side of the fluid-structure
-interaction problem.
+the Lagrangian particles based on the physical forces acting on them. This
+represents the "solid-side" of the Fluid-Structure Interaction (FSI) problem,
+implementing the physics described by Sustiel & Grier.
+
+The core function, `update_massive_deformable_particle`, advances the particle
+state for one time step by implementing two key physical principles:
+
+1.  **Advection of the Boundary (Eq. 3)**: The massless, fluid-interacting
+    boundary markers (`X`) are advected with the local fluid velocity. This is
+    achieved by first interpolating the Eulerian fluid velocity field onto the
+    Lagrangian marker locations using a discrete convolution.
+
+2.  **Newtonian Dynamics of the Mass (Eq. 5)**: The mass-carrying markers (`Y`)
+    are accelerated according to Newton's Second Law (`F=ma`). The net force
+    includes the reaction to the internal penalty-spring force and any body
+    forces like gravity. A semi-implicit Euler scheme is used to update the
+    positions and velocities of these markers.
+
+This module is a critical departure from the previous kinematic model, as the
+particle's motion is now a direct, dynamic consequence of the simulated physics.
 """
 
 from jax_ib.base import particle_class as pc
