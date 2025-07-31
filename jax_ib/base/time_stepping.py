@@ -14,24 +14,42 @@
 """
 Functions for advancing the simulation state forward in time.
 
-This module provides the core machinery for time integration. It defines data
-structures that represent the spatially discretized Navier-Stokes equations and
-then uses these structures to build time-stepping functions.
+This module provides the core machinery for time integration. It defines a
+powerful and modular architecture for constructing time-stepping functions
+that solve the spatially discretized Navier-Stokes equations coupled with an
+immersed boundary.
 
 The main architectural pattern is:
-1.  **ODE Class**: A class (e.g., `ExplicitNavierStokesODE_BCtime`) is defined to
-    hold all the functions that constitute the right-hand-side of the system of
-    ordinary differential equations (ODEs) that result from spatial discretization.
-    This includes functions for explicit terms, pressure projection, IBM forces, etc.
-2.  **Time-Stepper Factory**: A function (e.g., `navier_stokes_rk_updated`) takes an
-    instance of an ODE class and a time step `dt`, and returns a new function.
-3.  **Step Function**: The returned function (`step_fn`) is the final, concrete
-    time-stepper. It takes the current simulation state as input and returns the
-    state at the next time step, `t + dt`.
 
-This module implements a general Runge-Kutta (RK) framework and provides a
-specific implementation for Forward Euler.
+1.  **ODE Definition Classes**: A class (e.g., `ExplicitNavierStokesODE_BCtime`)
+    is used to encapsulate the physics of the problem. It acts as a container
+    for all the functions that constitute the right-hand-side of the system of
+    ordinary differential equations (ODEs) that result from spatial discretization.
+    This includes functions for explicit fluid terms (advection, diffusion),
+    pressure projection, IBM forces, and particle motion updates. Two main
+    versions exist:
+    - `ExplicitNavierStokesODE_Penalty`: A simpler definition for penalty-based
+      methods where the IBM forcing is part of the explicit fluid terms.
+    - `ExplicitNavierStokesODE_BCtime`: A comprehensive definition for a fully
+      coupled Fluid-Structure Interaction problem, with separate steps for
+      forcing and particle motion.
+
+2.  **Time-Stepper Factory**: A high-level function (e.g., `navier_stokes_rk_updated`)
+    acts as a "factory." It takes an instance of an ODE class, a time step `dt`,
+    and a `ButcherTableau` (which defines a specific Runge-Kutta method) and
+    returns a new function.
+
+3.  **Step Function**: The returned function (`step_fn`) is the final, concrete
+    time-stepper. It takes the current simulation state (`All_Variables` PyTree)
+    as input and returns the state at the next time step, `t + dt`. This is the
+    function that is typically used within a `jax.lax.scan` loop to run the
+-   full simulation.
+
+This design separates the physical model from the numerical integration scheme,
+making it easy to experiment with different time-stepping methods (e.g., Forward
+Euler, higher-order Runge-Kutta) without changing the underlying physics code.
 """
+
 import dataclasses
 from typing import Callable, Sequence, TypeVar
 import jax
