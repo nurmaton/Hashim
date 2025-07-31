@@ -12,20 +12,45 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Functions for interpolating values on a grid.
+Functions for interpolating values on a staggered grid.
 
-This module provides various numerical schemes for interpolation. Interpolation is a
-fundamental operation in CFD, used for two primary purposes:
+This module provides various numerical schemes for interpolation, which is a
+fundamental operation in CFD simulations. Interpolation is used for two primary
+purposes:
 
 1.  **Staggered Grid Transfers**: Moving data from one location on the staggered
-    grid to another (e.g., from cell centers to cell faces).
-2.  **Advection Schemes**: Estimating the value of a quantity at the "departure
-    point" or on a control volume face as part of a finite volume advection
-    calculation.
+    grid to another (e.g., from cell centers to cell faces). This is essential
+    for calculating fluxes and evaluating terms that involve quantities at
+    different locations.
 
-The module includes standard methods like linear interpolation, specialized CFD
-schemes like upwinding, and high-resolution Total Variation Diminishing (TVD)
-schemes that use flux limiters to balance accuracy and stability.
+2.  **Finite Volume Advection**: As part of an advection calculation, these
+    schemes are used to estimate the value of a quantity on a control volume
+    face. The choice of interpolation scheme directly determines the accuracy,
+    stability, and conservation properties of the advection algorithm.
+
+The module provides a hierarchy of common schemes with different trade-offs:
+
+-   `linear`: A standard, second-order accurate scheme. It is accurate for
+    smooth flows but can introduce unphysical oscillations ("wiggles") near
+    sharp gradients.
+
+-   `upwind`: A first-order scheme that is very robust and guaranteed to be
+    non-oscillatory. Its stability comes at the cost of introducing significant
+    numerical diffusion, which can smear out sharp features.
+
+-   `lax_wendroff`: A second-order scheme that is more accurate than upwind but
+    is not monotonic. It is typically not used alone but serves as the
+    high-order component in more advanced schemes.
+
+-   **Total Variation Diminishing (TVD) Schemes**: Implemented via the
+    `apply_tvd_limiter` factory, these high-resolution methods (e.g., using
+    `van_leer_limiter`) dynamically blend a low-order (upwind) and high-order
+    (Lax-Wendroff) scheme. They aim to achieve second-order accuracy in smooth
+    regions while reverting to the stable first-order scheme near shocks to
+    prevent oscillations, offering a good balance of accuracy and robustness.
+
+Finally, `point_interpolation` provides a general utility for interpolating
+field values at arbitrary off-grid locations.
 """
 
 from typing import Callable, Optional, Tuple, Union
