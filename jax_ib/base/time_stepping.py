@@ -253,6 +253,19 @@ class ExplicitNavierStokesODE_BCtime:
     """
     raise NotImplementedError
 
+import dataclasses
+from typing import Callable, Sequence, TypeVar
+import jax
+import tree_math
+from jax_ib.base import boundaries
+from jax_ib.base import grids
+from jax_cfd.base import time_stepping
+from jax_ib.base import particle_class
+
+# A generic type variable for JAX PyTrees, representing the simulation state.
+PyTreeState = TypeVar("PyTreeState")
+# A function that takes a state and returns a new state at the next time step.
+TimeStepFn = Callable[[PyTreeState], PyTreeState]
 
 @dataclasses.dataclass
 class ButcherTableau_updated:
@@ -337,13 +350,12 @@ def navier_stokes_rk_updated(
     def convert_to_velocity_vecot(u_grid_vars):
         """Extracts raw data arrays from a GridVariableVector."""
         u = u_grid_vars.tree
-        return tree_math.Vector(tuple(u[i].array for i in range(len(u))))
+        return tree_math.Vector(tuple(u[i].array.data for i in range(len(u))))
         
     def convert_to_velocity_tree(vel_vector_raw, bcs):
         """Re-wraps raw data arrays into a GridVariableVector."""
-        # return tree_math.Vector(tuple(grids.GridVariable(grids.GridArray(data, gv.offset, gv.grid), bc)
-        #                         for data, gv, bc in zip(vel_vector_raw.tree, u0.tree, bcs)))
-        return tree_math.Vector(tuple(grids.GridVariable(v,bc) for v,bc in zip(vel_vector_raw.tree,bcs)))
+        return tree_math.Vector(tuple(grids.GridVariable(grids.GridArray(data, gv.offset, gv.grid), bc)
+                                for data, gv, bc in zip(vel_vector_raw.tree, u0.tree, bcs)))
     
     def convert_all_variabl_to_velocity_vecot(u_all_vars):
         """Extracts the velocity GridVariableVector from the full state."""
