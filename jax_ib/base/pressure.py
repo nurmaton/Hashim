@@ -112,20 +112,19 @@ def _rhs_transform(
   """
   u_data = u.data
   # Check if all boundaries for every axis are Neumann.
-  is_all_neumann = all(
-      bc_type == boundaries.BCType.NEUMANN
-      for axis_bcs in bc.types for bc_type in axis_bcs
-  )
-  if is_all_neumann:
-    # If so, subtract the mean from the data to satisfy the solvability condition.
-    u_data = u_data - jnp.mean(u_data)
+  for axis in range(u.grid.ndim):
+    if bc.types[axis][0] == boundaries.BCType.NEUMANN and bc.types[axis][
+        1] == boundaries.BCType.NEUMANN:
+      # if all sides are neumann, poisson solution has a kernel of constant
+      # functions. We substact the mean to ensure consistency.
+      u_data = u_data - jnp.mean(u_data)
   return u_data
   
 
 def projection_and_update_pressure(
     All_variables: particle_class.All_Variables,
     solve: Callable = pressure.solve_fast_diag,
-) -> particle_class.All_Variables:
+) -> GridVariableVector:
   """
   Applies pressure projection to make a velocity field divergence-free and updates the state.
 
@@ -163,13 +162,16 @@ def projection_and_update_pressure(
 
   # Step 1: Solve the Poisson equation `∇²q = ∇ ⋅ v`. The `solve` function
   # computes `∇ ⋅ v` internally and returns the data array for `q`.
-  qsol_data = solve(v, q0)
+  qsol = solve(v, q0)
   # Wrap the result in a GridVariable.
-  q = grids.GridVariable(grids.GridArray(qsol_data, q0.offset, q0.grid), pressure_bc)
+  # q = grids.GridVariable(grids.GridArray(qsol_data, q0.offset, q0.grid), pressure_bc)
+  q = grids.GridVariable(qsol, pressure_bc)
     
   # Step 2: Update the total pressure field by adding the correction.
-  New_pressure_Array =  grids.GridArray(q.data + old_pressure.data, q.offset, q.grid)  
-  New_pressure = grids.GridVariable(New_pressure_Array, pressure_bc) 
+  # New_pressure_Array =  grids.GridArray(qsol.data + old_pressure.data, q.offset, q.grid)  
+  # New_pressure = grids.GridVariable(New_pressure_Array, pressure_bc) 
+  New_pressure_Array =  grids.GridArray(qsol.data + old_pressure.data,qsol.offset,qsol.grid)  
+  New_pressure = grids.GridVariable(New_pressure_Array,pressure_bc)     
 
   # Step 3: Correct the velocity by subtracting the pressure gradient: v_new = v - ∇q.
   q_grad = fd.forward_difference(q)
@@ -298,8 +300,8 @@ def solve_fast_diag_Far_Field(
   # Infer the correct pressure BCs from the velocity BCs.
   pressure_bc = boundaries.get_pressure_bc_from_velocity(v)
   # Subtract the mean from the RHS if the domain is all-Neumann.
-  rhs_transformed_data = _rhs_transform(rhs, pressure_bc)
-  rhs_transformed = grids.GridArray(rhs_transformed_data, rhs.offset, rhs.grid)
+  rhs_transformed = _rhs_transform(rhs, pressure_bc)
+  # rhs_transformed = grids.GridArray(rhs_transformed_data, rhs.offset, rhs.grid)
   
   # The commented out code shows a manual construction of the Laplacian matrices.
   # laplacians = [
@@ -316,7 +318,7 @@ def solve_fast_diag_Far_Field(
   pinv = fast_diagonalization.pseudoinverse(
       laplacians, rhs_transformed.dtype,
       hermitian=True, circulant=False, implementation='matmul')
-  return grids.applied(pinv)(rhs_transformed)
+  return grids.applied(pinv)(rhs)
 
 def calc_P(
     v: GridVariableVector,
@@ -347,6 +349,7 @@ def calc_P(
   # Solve for the pressure correction data using the provided `solve` function.
   q_data = solve(v, q0)
   # Wrap the data in a GridVariable.
-  q = grids.GridVariable(grids.GridArray(q_data, q0.offset, q0.grid), pressure_bc)
-
+  # q = grids.GridVariable(grids.GridArray(q_data, q0.offset, q0.grid), pressure_bc)
+  q = grids.GridVariable(q_data, pressure_bc)
+    
   return q
