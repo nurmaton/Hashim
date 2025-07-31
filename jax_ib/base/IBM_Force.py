@@ -12,14 +12,32 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Implements the Immersed Boundary Method (IBM) force calculation.
+Implements the core physical force calculations for the deformable Immersed
+Boundary Method (IBM).
 
-This module contains functions to calculate the interaction forces between a
-deformable, immersed particle and the surrounding fluid. The implementation
-is based on the "Penalty Method", where physical forces (internal elasticity,
-surface tension) are calculated on the particle boundary and then spread to the
-Eulerian fluid grid. This approach is suitable for simulating dynamic, deformable
-bodies.
+This module is central to simulating dynamic, deformable bodies. It uses a
+penalty-based approach, inspired by the model from Sustiel & Grier, to compute
+the real physical forces a body exerts on the surrounding fluid.
+
+The physical model is based on two sets of Lagrangian markers:
+1.  **Mass-carrying markers (`Y`)**: These hold the object's inertia and are
+    evolved by the Molecular Dynamics (`MD`) integrator.
+2.  **Fluid-interacting boundary markers (`X`)**: These are massless points
+    that define the object's boundary and directly experience forces.
+
+The interaction forces calculated here are:
+-   **Penalty Force**: A spring-like force `F = Kp(Y - X)` that models the
+    body's internal elasticity, tethering the boundary markers to the mass
+    markers.
+-   **Surface Tension Force**: An inward-pulling force proportional to the local
+    boundary curvature, which acts to minimize surface area.
+
+The key steps implemented in this module are:
+1.  Calculate the total physical force (penalty + tension) on each Lagrangian
+    boundary marker.
+2.  "Spread" this discrete Lagrangian force onto the continuous Eulerian fluid
+    grid using a regularized (smooth) delta function. This results in a force
+    field that is added to the Navier-Stokes equations in the main solver.
 """
 
 import jax.numpy as jnp
