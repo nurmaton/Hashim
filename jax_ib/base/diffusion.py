@@ -19,17 +19,35 @@
 # discretizations or boundary conditions.
 
 """
-Module for functionality related to the diffusion term in the Navier-Stokes eq.
+Module for computing the diffusion term in the Navier-Stokes equations.
 
-Diffusion describes the process by which momentum is transported due to random
-molecular motion. In fluid dynamics, this is manifested as viscosity, which acts
-as an internal friction that smooths out velocity gradients.
+Diffusion describes the transport of momentum due to random molecular motion,
+which manifests as viscosity in a fluid. It acts as an internal friction that
+smooths out velocity gradients over time. This module implements the diffusion
+term, `ν ∇²v`, and provides methods for its numerical solution.
 
-This module implements the diffusion term, `ν ∇²v`, and provides multiple methods
-for solving the diffusion equation, which is required for implicit time-stepping
-schemes. These methods include iterative solvers (`solve_cg`) and direct solvers
-based on matrix diagonalization (`solve_fast_diag`).
+The functions provided can be categorized as follows:
+
+1.  **Explicit Diffusion (`diffuse`)**: This function calculates the diffusion
+    term `ν * ∇²v` directly using a finite difference approximation of the
+    Laplacian. It is intended for use in explicit time-stepping schemes (e.g.,
+    Forward Euler). While simple to implement, these schemes are subject to a
+    strict time step constraint (`stable_time_step`) for numerical stability.
+
+2.  **Implicit Diffusion Solvers**: These functions solve the diffusion equation
+    for the velocity at the *next* time step, `v_new`. This is required for
+    implicit schemes (e.g., Backward Euler), which are unconditionally stable
+    and allow for much larger time steps. Solving the implicit equation requires
+    solving a large linear system of equations, `(I - ν*dt*∇²) v_new = v_old`.
+    Two methods are provided:
+    -   `solve_cg`: An iterative solver using the Conjugate Gradient method.
+        It is memory-efficient and can handle complex boundary conditions, but
+        convergence can be slow.
+    -   `solve_fast_diag`: A direct solver that uses the Fast Fourier Transform
+        (FFT) to diagonalize the Laplacian operator. It is extremely fast and
+        accurate but is restricted to periodic domains.
 """
+
 from typing import Optional
 
 import jax.scipy.sparse.linalg
