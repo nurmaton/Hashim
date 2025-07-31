@@ -73,12 +73,7 @@ def delta_approx_logistjax(x: jnp.ndarray, x0: float, w: float) -> jnp.ndarray:
 
 
 
-def new_surf_fn(
-    field: grids.GridVariable,
-    xp: jnp.ndarray,
-    yp: jnp.ndarray,
-    discrete_fn: Callable
-) -> jnp.ndarray:
+def new_surf_fn(field,xp,yp,discrete_fn):
     """
     Performs the core IBM convolution integral using a separable 2D delta function.
 
