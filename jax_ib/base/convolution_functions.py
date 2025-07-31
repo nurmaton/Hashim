@@ -40,10 +40,8 @@ making heavy use of JAX's features for vectorization (`vmap`) and multi-device
 parallelization (`pmap`) to handle large numbers of Lagrangian markers.
 """
 
-from typing import Callable
 import jax
 import jax.numpy as jnp
-from jax_ib.base import grids
 
 
 def delta_approx_logistjax(x: jnp.ndarray, x0: float, w: float) -> jnp.ndarray:
