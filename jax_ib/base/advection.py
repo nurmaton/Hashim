@@ -194,7 +194,7 @@ def advect_upwind(
   return advect_general(c, v, interpolation.linear, interpolation.upwind, dt)
 
 
-def _align_velocities(v: GridVariableVector) -> Tuple[GridVariableVector, ...]:
+def _align_velocities(v: GridVariableVector) -> Tuple[GridVariableVector]:
   """
   Pre-interpolates all velocity components needed for the convection term `(v ⋅ ∇)v`.
   
@@ -230,8 +230,8 @@ def _align_velocities(v: GridVariableVector) -> Tuple[GridVariableVector, ...]:
 
 
 def _velocities_to_flux(
-    aligned_v: Tuple[GridVariableVector, ...]
-) -> Tuple[GridVariableVector, ...]:
+    aligned_v: Tuple[GridVariableVector]
+) -> Tuple[GridVariableVector]:
   """
   Computes the momentum flux tensor `v_i * v_j` from aligned velocity components.
 
@@ -267,7 +267,7 @@ def _velocities_to_flux(
             aligned_v[i][j], aligned_v[j][i])
         
         # Calculate the flux component `v_i * v_j` and wrap it in a GridVariable.
-        flux_component = grids.GridVariable(
+        flux_component = GridVariable(
             aligned_v[i][j].array * aligned_v[j][i].array, bc
         )
         # Add the computed component to the `i`-th row of the flux tensor.
@@ -401,7 +401,7 @@ def advect_van_leer(
     flux.append(upwind_flux + flux_correction)
     
   # Step 5: Assign boundary conditions to the final flux vector and compute its divergence.
-  flux_gv = tuple(grids.GridVariable(f, c.bc) for f in flux)
+  flux_gv = tuple(GridVariable(f, c.bc) for f in flux)
   advection = -fd.divergence(flux_gv)
   
   return advection
@@ -464,11 +464,11 @@ def advect_step_semilagrangian(
   # Step 3: Interpolate the original data `c` at the fractional `indices`.
   # `jax.scipy.ndimage.map_coordinates` performs multi-dimensional spline interpolation.
   # `order=1` specifies linear interpolation. `mode='wrap'` handles the periodic BCs.
-  c_advected_data = jax.scipy.ndimage.map_coordinates(
-      c.data, indices, order=1, mode='wrap')
+  c_advected_data = grids.applied(jax.scipy.ndimage.map_coordinates)(
+      c.array, indices, order=1, mode='wrap')
       
   # Wrap the new data in a GridVariable and return it.
-  return grids.GridVariable(grids.GridArray(c_advected_data, c.offset, c.grid), c.bc)
+  return GridVariable(c_advected, c.bc)
 
 
 # TODO(dkochkov): These comments are notes for future development.
