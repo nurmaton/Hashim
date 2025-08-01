@@ -313,7 +313,7 @@ def navier_stokes_rk_updated(
   num_steps = len(b)
   
   @tree_math.wrap # Allows the step function to operate on the `All_Variables` PyTree.
-  def step_fn(u0_all_vars):
+  def step_fn(u0):
     """The returned function that performs one complete time step."""
     # Lists to store the state `u` and derivative `k` at each RK stage.
     u = [None] * num_steps
@@ -324,94 +324,93 @@ def navier_stokes_rk_updated(
     # a `GridVariableVector` for velocity, and a `Vector` of raw JAX arrays.
     # This is complex and suggests the data structures could potentially be simplified.
 
-    def convert_to_velocity_vecot(u_grid_vars):
+    def convert_to_velocity_vecot(u0):
         """Extracts raw data arrays from a GridVariableVector."""
-        u = u_grid_vars.tree
-        return tree_math.Vector(tuple(u[i].array.data for i in range(len(u))))
+        u = u0.tree
+        return tree_math.Vector(tuple(u[i].array for i in range(len(u))))
         
-    def convert_to_velocity_tree(vel_vector_raw, bcs):
+    def convert_to_velocity_tree(m, bcs):
         """Re-wraps raw data arrays into a GridVariableVector."""
-        # return tree_math.Vector(tuple(grids.GridVariable(grids.GridArray(data, gv.offset, gv.grid), bc)
-        #                         for data, gv, bc in zip(vel_vector_raw.tree, u0.tree, bcs)))
-        return tree_math.Vector(tuple(grids.GridVariable(v,bc) for v,bc in zip(vel_vector_raw.tree,bcs)))      
+        return tree_math.Vector(tuple(grids.GridVariable(v,bc) for v,bc in zip(m.tree, bcs)))  
     
-    def convert_all_variabl_to_velocity_vecot(u_all_vars):
+    def convert_all_variabl_to_velocity_vecot(u0):
         """Extracts the velocity GridVariableVector from the full state."""
-        u = u_all_vars.tree.velocity
+        u = u0.tree.velocity
         return  tree_math.Vector(u)
         
-    def covert_veloicty_to_All_variable_vecot(particles, vel_tree, pressure, Drag, Step_count, MD_var):
+    def covert_veloicty_to_All_variable_vecot(particles,m,pressure,Drag,Step_count,MD_var):
         """Rebuilds the full All_Variables state from its components."""
-        u = vel_tree.tree
-        return tree_math.Vector(particle_class.All_Variables(particles, u, pressure, Drag, Step_count, MD_var))
+        u = m.tree
+        return tree_math.Vector(particle_class.All_Variables(particles,u,pressure,Drag,Step_count,MD_var))
     
     # --- Helper functions to extract non-velocity parts of the state. ---
-    def velocity_bc(u_all_vars): return tuple(uv.bc for uv in u_all_vars.tree.velocity)
-    def the_particles(u_all_vars): return u_all_vars.tree.particles
-    def the_pressure(u_all_vars): return u_all_vars.tree.pressure
-    def the_Drag(u_all_vars): return u_all_vars.tree.Drag
+    def velocity_bc(u0):
+        u = u0.tree.velocity
+        return tuple(u[i].bc for i in range(len(u)))
+    def the_particles(u0):
+        return u0.tree.particles
+    def the_pressure(u0):
+        return u0.tree.pressure
+    def the_Drag(u0):
+        return u0.tree.Drag
     
     # --- Main Time-Stepping Logic ---
     # 1. Unpack the initial state `u0_all_vars`.
-    particles = the_particles(u0_all_vars)
-    ubc = velocity_bc(u0_all_vars)  
-    pressure = the_pressure(u0_all_vars)
-    Drag = the_Drag(u0_all_vars)
-    Step_count = u0_all_vars.tree.Step_count
-    MD_var = u0_all_vars.tree.MD_var
+    particles = the_particles(u0)
+    ubc = velocity_bc(u0)  
+    pressure = the_pressure(u0)
+    Drag = the_Drag(u0)
+    Step_count = u0.tree.Step_count
+    MD_var = u0.tree.MD_var
     
     # Isolate the initial velocity.
-    u0 = convert_all_variabl_to_velocity_vecot(u0_all_vars)
+    u0 = convert_all_variabl_to_velocity_vecot(u0)
 
     # 2. Perform the Runge-Kutta stages.
-    u0_raw = convert_to_velocity_vecot(u0)
-    u[0] = u0_raw
+    u[0] = convert_to_velocity_vecot(u0)
     k[0] = convert_to_velocity_vecot(F(u0)) # k0 = F(u(t))
     dP = Grad_Pressure(tree_math.Vector(pressure)) # Pre-calculate pressure gradient?
 
     for i in range(1, num_steps):
       # Calculate the intermediate velocity `u_star` for the current stage.
-      u_star_raw = u0_raw + dt * sum(a[i-1][j] * k[j] for j in range(i) if a[i-1][j])
+      u_star = u0 + dt * sum(a[i-1][j] * k[j] for j in range(i) if a[i-1][j])
       # Project the intermediate velocity to enforce incompressibility.
-      u_star_tree = convert_to_velocity_tree(u_star_raw, ubc)
-      u[i] = convert_to_velocity_vecot(P(u_star_tree))
+      u[i] = convert_to_velocity_vecot(P(convert_to_velocity_tree(u_star,ubc)))  
       # Calculate the derivative at the intermediate stage: ki = F(u(t + c_i*dt)).
-      k[i] = convert_to_velocity_vecot(F(convert_to_velocity_tree(u[i], ubc)))
+      k[i] = convert_to_velocity_vecot(F(convert_to_velocity_tree(u[i],ubc)))
 
     # 3. Combine stages to get the final explicit velocity update.
     # The pressure gradient `dP` is subtracted here, an unconventional step.
-    u_star_raw = u0_raw + dt * sum(b[j] * k[j] for j in range(num_steps) if b[j]) - dP
+    u_star = u0 + dt * sum(b[j] * k[j] for j in range(num_steps) if b[j])-dP
     
     # 4. Apply the Immersed Boundary Method forcing.
-    u_star_tree = convert_to_velocity_tree(u_star_raw, ubc)
-    u_star_all_vars = covert_veloicty_to_All_variable_vecot(particles, u_star_tree, pressure, Drag, Step_count, MD_var)
-    Force = IBM(u_star_all_vars)
+    Force = IBM(covert_veloicty_to_All_variable_vecot(particles,convert_to_velocity_tree(u_star,ubc),pressure,Drag,Step_count,MD_var))
     
     # 5. Calculate diagnostic quantities.
     # This uses the Force as input, which is unusual. It might be calculating the
     # fluid's reaction force on the body.
-    Drag_variable = Drag_Calculation(covert_veloicty_to_All_variable_vecot(particles, Force, pressure, Drag, Step_count, MD_var))
+    Drag_variable = Drag_Calculation(covert_veloicty_to_All_variable_vecot(particles,Force,pressure,Drag,Step_count,MD_var))
     Drag = the_Drag(Drag_variable)
     
-    Force_raw = convert_to_velocity_vecot(Force)
+    Force = convert_to_velocity_vecot(Force)
     
     # Add the IBM force to the intermediate velocity.
-    u_star_star_raw = u_star_raw + dt * Force_raw
+    u_star_star = u_star + dt * Force
     
     # The commented out code block appears to be a previous iteration of the logic.
     
     # 6. Final pressure projection and state updates.
-    u_final_tree = convert_to_velocity_tree(u_star_star_raw, ubc)
-    u_final_all_vars = covert_veloicty_to_All_variable_vecot(particles, u_final_tree, pressure, Drag, Step_count, MD_var)
+    u_final = convert_to_velocity_tree(u_star_star,ubc)
+    u_final = covert_veloicty_to_All_variable_vecot(particles,u_final,pressure,Drag,Step_count,MD_var)
     
     # Final projection to ensure the velocity field is divergence-free after forcing.
-    u_final_all_vars = P(u_final_all_vars)
+    u_final = P(u_final)
     # Update time-dependent boundary conditions for the next step.
-    u_final_all_vars = M(u_final_all_vars)
+    u_final = M(u_final)
     # Update the particle position based on the final, corrected fluid velocity.
-    u_final_all_vars = Update_Pos(u_final_all_vars)
+    u_final = Update_Pos(u_final)
     
-    return u_final_all_vars
+    return u_final
 
   return step_fn
 
