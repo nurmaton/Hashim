@@ -112,7 +112,7 @@ def _linear_along_axis(
   # If the offset delta is a whole number, interpolation is just a simple shift.
   # The `.shift()` method correctly handles boundary conditions.
   if np.isclose(offset_delta, int(offset_delta)):
-    shifted_array = c.shift(int(round(offset_delta)), axis)
+    shifted_array = c.shift(int(offset_delta), axis)
     return grids.GridVariable(
         array=grids.GridArray(data=shifted_array.data,
                               offset=new_offset,
@@ -236,7 +236,7 @@ def upwind(
   # If offsets differ by a whole number, the operation is just a simple shift.
   if np.isclose(offset_delta, int(offset_delta)):
     return grids.GridVariable(
-        array=grids.GridArray(data=c.shift(int(round(offset_delta)), axis).data,
+        array=grids.GridArray(data=c.shift(int(offset_delta), axis).data,
                               offset=offset,
                               grid=grids.consistent_grid(c, u)),
         bc=c.bc)
@@ -254,7 +254,7 @@ def upwind(
       u.array > 0,  # Condition: where is the velocity positive?
       c.shift(floor, axis).data,  # Value if True: take data from the `floor` neighbor.
       c.shift(ceil, axis).data    # Value if False: take data from the `ceil` neighbor.
-  )
+  ).data
   
   # Ensure the grid information is consistent.
   grid = grids.consistent_grid(c, u)
