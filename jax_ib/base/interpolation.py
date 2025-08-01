@@ -359,7 +359,7 @@ def lax_wendroff(
       bc=boundaries.periodic_boundary_conditions(grid.ndim))
 
 
-def safe_div(x: Array, y: Array, default_numerator: float = 1.0) -> Array:
+def safe_div(x, y, default_numerator = 1):
   """
   Performs element-wise division `x / y` safely.
 
@@ -382,7 +382,7 @@ def safe_div(x: Array, y: Array, default_numerator: float = 1.0) -> Array:
   return x / jnp.where(y != 0, y, default_numerator)
 
 
-def van_leer_limiter(r: Array) -> Array:
+def van_leer_limiter(r):
   """
   Computes the Van Leer flux limiter function.
 
@@ -523,7 +523,7 @@ def point_interpolation(
     point: Array,
     c: GridArray,
     order: int = 1,
-    mode: str = 'constant',
+    mode: str = 'nearest',
     cval: float = 0.0,
 ) -> jax.Array:
   """
