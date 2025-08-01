@@ -40,7 +40,7 @@ import jax
 import jax.numpy as jnp
 
 
-def displacement(parameters: list, t: float) -> jnp.ndarray:
+def displacement(parameters, t):
     """
     Calculates a simple sinusoidal displacement along the x-axis.
 
@@ -62,7 +62,7 @@ def displacement(parameters: list, t: float) -> jnp.ndarray:
     return jnp.array([A0/2*jnp.cos(2*jnp.pi*f*t),0.])
     
     
-def rotation(parameters: list, t: float) -> float:
+def rotation(parameters, t):
     """
     Calculates a simple sinusoidal rotation angle.
 
@@ -82,7 +82,7 @@ def rotation(parameters: list, t: float) -> float:
     # The angle oscillates sinusoidally around a mean value `alpha0`.
     return alpha0 + beta*jnp.sin(2*jnp.pi*f*t+phi)
 
-def Displacement_Foil_Fourier_Dotted_Mutliple(parameters: list, t: float) -> jnp.ndarray:
+def Displacement_Foil_Fourier_Dotted_Mutliple(parameters, t):
     """
     Calculates a complex foil displacement based on a Fourier series.
     This function is designed to work with a batch of multiple particles,
