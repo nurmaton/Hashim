@@ -972,7 +972,7 @@ class Grid:
     return GridArray(fn(*self.mesh(offset)), offset, self)
 
 
-def domain_interior_masks(grid: Grid) -> Tuple[np.ndarray, ...]:
+def domain_interior_masks(grid: Grid):
   """
   Returns boolean masks that identify the interior cell faces of the domain.
 
