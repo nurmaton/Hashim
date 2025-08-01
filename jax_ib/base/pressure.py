@@ -323,7 +323,7 @@ def solve_fast_diag_Far_Field(
 def calc_P(
     v: GridVariableVector,
     solve: Callable = solve_fast_diag,
-) -> GridVariable:
+) -> GridVariableVector:
   """
   Calculates the pressure correction field `q` for a given velocity `v`.
 
