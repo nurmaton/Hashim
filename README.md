@@ -1,81 +1,103 @@
-# jax_ib
-Immersed Boundary implementation in jax-cfd library
+# JAX-IB: A Differentiable Immersed Boundary Method for Deformable Bodies
 
+This repository contains a [JAX](https://github.com/google/jax)-based implementation of the Immersed Boundary (IB) method for simulating Fluid-Structure Interaction (FSI), with a focus on **dynamic, deformable bodies**.
 
-## Overview
+The entire simulation is constructed as a JAX PyTree, making the solver end-to-end differentiable. This allows for the use of gradient-based optimization to solve inverse problems, such as discovering optimal flapping motions or material properties for an immersed object.
 
-This repository contains an implementation of an immersed boundary method in jax-cfd package. The immersed boundary method is a numerical technique used to simulate the interaction between fluid flow and immersed objects, such as particles, structures, or boundaries.
+The primary example in this repository is the `Flapping Demo.ipynb`, which simulates a flexible, ellipse-like object flapping and deforming in a fluid, driven by internal physical forces.
 
-## Features
+<!-- Recommendation: Create a GIF of your flapping demo notebook output and replace this comment with the markdown for it! Example: ![Flapping Demo GIF](path/to/your/demo.gif) -->
 
-- Simulates transport of multiple rigid bodies 
-- Combines Brownian dynamics integration with CFD for passive particle transport simulations
+---
 
-## Installation
+## Background and Acknowledgment
 
-To use a local version of the code, follow these steps:
+This project is an adaptation and extension of the original `jax_ib` framework developed by Mohammed Alhashim, available at:
+*   **Original Repository:** [https://github.com/hashimmg/jax_ib](https://github.com/hashimmg/jax_ib)
 
-1. Clone the repository to your local machine:
+The original project was a groundbreaking differentiable solver for **rigid bodies**, as described in the PNAS paper:
+> Alhashim, M. G., Hausknecht, K., & Brenner, M. P. (2025). Control of flow behavior in complex fluids using automatic differentiation. *PNAS, 122*(8).
 
+This repository builds upon that foundation by introducing the physics for **deformable bodies**, drawing inspiration from the penalty-based IBM for fluid droplets described in:
+> Sustiel, J. B., & Grier, D. G. (2022). Complex dynamics of an acoustically levitated fluid droplet captured by a low-order immersed boundary method.
+
+## Key Modifications for Deformable Body Physics
+
+To transition the framework from pre-determined rigid body motion to dynamic deformable body physics, several core modules in the `jax_ib/base/` directory were significantly rewritten. The key changes include:
+
+*   `particle_class.py`: The `particle` class was fundamentally changed from a kinematic descriptor to a **stateful container**. It no longer holds parameters for motion functions but instead holds the dynamic state variables (marker positions, velocities, etc.) that are evolved by the physics simulation.
+
+*   `particle_motion.py`: The logic was changed from evaluating prescribed motion functions to implementing the **dynamic equations of motion**. It now updates the particle's state by advecting boundary markers with the fluid velocity (Eq. 3 from Sustiel & Grier) and accelerating mass-carrying markers with Newtonian physics (Eq. 5).
+
+*   `IBM_Force.py`: The force calculation was changed from a kinematic correction term to computing **real physical forces**. It now calculates the internal penalty spring force (Eq. 4) and surface tension (Eq. 7) that the deformable body exerts on the fluid.
+
+*   `boundaries.py`: The functions for time-dependent boundary conditions (`update_BC`, `Reserve_BC`) were simplified to pass-through functions, as the deformable body simulation uses static far-field boundaries. A critical bug related to JAX PyTree stability in `get_pressure_bc_from_velocity` was also fixed to ensure compatibility with `jax.lax.scan`.
+
+## Getting Started
+
+### Prerequisites
+
+You will need Python 3.8+ and the following packages:
+*   `jax` and `jaxlib` (with GPU/TPU support if available)
+*   `numpy`
+*   `scipy`
+*   `matplotlib` (for plotting in the notebook)
+*   `tqdm` (for progress bars)
+
+### Installation
+
+1.  Clone the repository:
     ```bash
-    git clone https://github.com/hashimmg/jax_ib.git
+    git clone https://github.com/nurmaton/Hashim.git
+    cd Hashim
     ```
 
-2. Navigate to the project directory:
-
+2.  Create and activate a virtual environment (recommended):
     ```bash
-    cd jax_ib
+    python3 -m venv venv
+    source venv/bin/activate
     ```
 
-3. ```bash
-   pip install -e .
-   ```
-   
-### Example
+3.  Install the required packages. A `requirements.txt` file is provided for convenience.
+    ```bash
+    pip install -r requirements.txt
+    ```
+    *(Note: For GPU/TPU support, please follow the official [JAX installation instructions](https://github.com/google/jax#installation) to get the correct version of `jaxlib` for your CUDA/ROCm setup.)*
 
-The repository contains two examples:
+### Running the Flapping Demo
 
-- [Flapping of an ellipse airfoil](https://github.com/hashimmg/jax_ib/blob/main/jax_ib/notebooks/Flapping_Demo.ipynb)
-- [Mixing in Journal bearing](https://github.com/hashimmg/jax_ib/blob/main/jax_ib/notebooks/journal_bearing_demo.ipynb)
-- [Taylor Dispersion](https://github.com/hashimmg/jax_ib/blob/main/jax_ib/notebooks/taylor_dispersion_demo.ipynb)
+The main example is a Jupyter Notebook.
 
-### Other Packages Used
-This project relies on the following external packages:
+1.  Start a Jupyter server (e.g., JupyterLab):
+    ```bash
+    jupyter lab
+    ```
 
-jax-cfd, jax-md
+2.  Navigate to the `notebooks/` directory and open the `Flapping Demo.ipynb` file.
 
-Citing External Packages
-If you use this code in your research, please ensure to cite the relevant works. Here are the citations for the packages used in this project:
+3.  You can run the cells in the notebook to set up, run, and visualize the deformable flapping simulation.
 
-Package 1: jax-cfd
-```bash 
-@article{Kochkov2021-ML-CFD,
-  author = {Kochkov, Dmitrii and Smith, Jamie A. and Alieva, Ayya and Wang, Qing and Brenner, Michael P. and Hoyer, Stephan},
-  title = {Machine learning{\textendash}accelerated computational fluid dynamics},
-  volume = {118},
-  number = {21},
-  elocation-id = {e2101784118},
-  year = {2021},
-  doi = {10.1073/pnas.2101784118},
-  publisher = {National Academy of Sciences},
-  issn = {0027-8424},
-  URL = {https://www.pnas.org/content/118/21/e2101784118},
-  eprint = {https://www.pnas.org/content/118/21/e2101784118.full.pdf},
-  journal = {Proceedings of the National Academy of Sciences}
+## Core Concepts of the Deformable Model
+
+The physics of the deformable body is based on the **penalty Immersed Boundary Method**, which uses two sets of Lagrangian markers:
+
+1.  **Mass-carrying markers (`Y`)**: These hold the particle's inertia and are evolved by a Molecular Dynamics-style integrator. Their motion is governed by Newton's Second Law, `M * d²Y/dt² = F_penalty + F_gravity` (Eq. 5).
+2.  **Fluid-interacting markers (`X`)**: These are massless points that define the object's boundary. They are advected by the local fluid velocity, calculated via an integral `U(X) = ∫ u(x) δ(x - X) dx` (Eq. 3).
+
+The two sets of markers are connected by stiff springs that generate a **penalty force**, `F = Kp(Y - X)` (Eq. 4), which models the body's elasticity. The model also includes a **surface tension force**, `F = -σ * d(l_hat)/ds` (Eq. 7), which acts to minimize the boundary length.
+
+## Citation
+
+If you use this code in your research, please consider citing the original works that this project is based on:
+
+```bibtex
+@article{alhashim2025control,
+  title={Control of flow behavior in complex fluids using automatic differentiation},
+  author={Alhashim, Mohammed G and Hausknecht, Kaylie and Brenner, Michael P},
+  journal={Proceedings of the National Academy of Sciences},
+  volume={122},
+  number={8},
+  pages={e2403644122},
+  year={2025},
+  publisher={National Acad Sciences}
 }
-```
-Package 2: jax-md
-```bash 
-@inproceedings{jaxmd2020,
- author = {Schoenholz, Samuel S. and Cubuk, Ekin D.},
- booktitle = {Advances in Neural Information Processing Systems},
- publisher = {Curran Associates, Inc.},
- title = {JAX M.D. A Framework for Differentiable Physics},
- url = {https://papers.nips.cc/paper/2020/file/83d3d4b6c9579515e1679aca8cbc8033-Paper.pdf},
- volume = {33},
- year = {2020}
-}
-```
-
-
-
