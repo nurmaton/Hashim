@@ -4,7 +4,7 @@ This repository contains a [JAX](https://github.com/google/jax)-based implementa
 
 The entire simulation is constructed as a JAX PyTree, making the solver end-to-end differentiable. This allows for the use of gradient-based optimization to solve inverse problems, such as discovering optimal flapping motions or material properties for an immersed object.
 
-The primary example in this repository is the `Flapping Demo.ipynb`, which simulates a flexible, ellipse-like object flapping and deforming in a fluid, driven by internal physical forces.
+The primary example in this repository is the `Flapping_Demo.ipynb`, which simulates a flexible, ellipse-like object flapping and deforming in a fluid, driven by internal physical forces.
 
 <!-- Recommendation: Create a GIF of your flapping demo notebook output and replace this comment with the markdown for it! Example: ![Flapping Demo GIF](path/to/your/demo.gif) -->
 
