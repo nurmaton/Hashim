@@ -255,7 +255,7 @@ class ConstantBoundaryConditions(BoundaryConditions):
       A new, padded `GridArray`.
     """
 
-    def make_padding(width: int):
+    def make_padding(width):
       """
       A nested helper function to create the padding configuration tuple
       that `jnp.pad` expects.
@@ -497,7 +497,7 @@ class ConstantBoundaryConditions(BoundaryConditions):
     # Return a new GridArray with the trimmed data and updated offset.
     return GridArray(data, tuple(offset), u.grid)
 
-  def _trim_padding(self, u: grids.GridArray, axis: int = 0):
+  def _trim_padding(self, u: grids.GridArray, axis = 0):
     """
     Trims all excess ghost cell padding from a GridArray to make its shape
     match the underlying grid's shape.
@@ -822,7 +822,7 @@ class TimeDependentBoundaryConditions(ConstantBoundaryConditions):
     return cls(*children, *aux_data)
 
 
-def boundary_function(t: float) -> jnp.ndarray:
+def boundary_function(t):
   """
   An example of a function defining a time-dependent boundary value.
   
@@ -1182,7 +1182,7 @@ def Far_field_boundary_conditions(
       boundary_fn=bc_fn
   )
 
-def find_extremum(fn: Callable, extrema: str, i_guess: float) -> float:
+def find_extremum(fn, extrema, i_guess):
     """
     A simple wrapper around `scipy.optimize.fmin` to find a maximum or minimum
     of a 1D function.
@@ -1245,7 +1245,7 @@ def periodic_and_neumann_boundary_conditions(
 
 def periodic_and_dirichlet_boundary_conditions(
     bc_vals: Optional[Tuple[float, float]] = None,
-    periodic_axis: int = 0
+    periodic_axis = 0
 ) -> ConstantBoundaryConditions:
   """
   A factory for 2D BCs with one periodic and one Dirichlet axis.
