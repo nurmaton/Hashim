@@ -44,7 +44,7 @@ import jax
 import jax.numpy as jnp
 
 
-def delta_approx_logistjax(x,x0,w):
+def delta_approx_logistjax(x, x0, w):
     """
     A smoothed, differentiable approximation of the 1D Dirac delta function.
 
@@ -73,7 +73,7 @@ def delta_approx_logistjax(x,x0,w):
 
 
 
-def new_surf_fn(field,xp,yp,discrete_fn):
+def new_surf_fn(field, xp, yp, discrete_fn):
     """
     Performs the core IBM convolution integral using a separable 2D delta function.
 
