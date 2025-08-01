@@ -25,7 +25,7 @@ import jax.numpy as jnp
 import jax
 
 
-def surface_fn_jax(field: jnp.ndarray, surface_coord: list) -> jnp.ndarray:
+def surface_fn_jax(field, surface_coord):
     """
     Interpolates a field at a set of fractional coordinates using JAX's `map_coordinates`.
 
@@ -48,7 +48,7 @@ def surface_fn_jax(field: jnp.ndarray, surface_coord: list) -> jnp.ndarray:
     return jax.scipy.ndimage.map_coordinates(field, surface_coord, order=1)
 
 
-def interpolate_pbc(field: grids.GridVariable, list_p: jnp.ndarray) -> jnp.ndarray:
+def interpolate_pbc(field, list_p):
     """
     Interpolates a `GridVariable` field to a list of physical particle positions.
 
@@ -92,7 +92,7 @@ def interpolate_pbc(field: grids.GridVariable, list_p: jnp.ndarray) -> jnp.ndarr
     return surface_fn_jax(field.data, surface_coord)
 
 
-def custom_force_fn_pbc(all_variables) -> jnp.ndarray:
+def custom_force_fn_pbc(all_variables):
     """
     Calculates the hydrodynamic force on MD particles from the fluid velocity.
 
