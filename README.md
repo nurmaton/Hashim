@@ -101,3 +101,14 @@ If you use this code in your research, please consider citing the original works
   year={2025},
   publisher={National Acad Sciences}
 }
+
+@article{sustiel2022complex,
+  title={Complex dynamics of an acoustically levitated fluid droplet captured by a low-order immersed boundary method},
+  author={Sustiel, Jacqueline B and Grier, David G},
+  journal={Physical Review Fluids},
+  volume={7},
+  number={8},
+  pages={084001},
+  year={2022},
+  publisher={APS}
+}
