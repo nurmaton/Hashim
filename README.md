@@ -37,12 +37,9 @@ To transition the framework from pre-determined rigid body motion to dynamic def
 
 ### Prerequisites
 
-You will need Python 3.8+ and the following packages:
-*   `jax` and `jaxlib` (with GPU/TPU support if available)
-*   `numpy`
-*   `scipy`
-*   `matplotlib` (for plotting in the notebook)
-*   `tqdm` (for progress bars)
+You will need a working Python 3.8+ environment with `pip`.
+
+All specific Python package dependencies are listed in the `pyproject.toml` file and will be installed automatically in the next step.
 
 ### Installation
 
@@ -58,15 +55,23 @@ You will need Python 3.8+ and the following packages:
     source venv/bin/activate
     ```
 
-3.  Install the required packages. A `requirements.txt` file is provided for convenience.
+3.  Install the package. For development, it is highly recommended to perform an **editable install** using the `-e` flag. This links the installed package to your source files, so any changes you make to the code are immediately effective without needing to reinstall.
+
     ```bash
-    pip install -r requirements.txt
+    # Install the base package in editable mode
+    pip install -e .
     ```
-    *(Note: For GPU/TPU support, please follow the official [JAX installation instructions](https://github.com/google/jax#installation) to get the correct version of `jaxlib` for your CUDA/ROCm setup.)*
+
+4.  **(Optional)** To run the visualization code in the notebooks, install the optional `[data]` dependencies:
+    ```bash
+    pip install -e ".[data]"
+    ```
+
+*(**Important Note on JAX:** For GPU/TPU support, you may need a specific version of `jaxlib`. Please follow the official [JAX installation instructions](https://github.com/google/jax#installation) *after* the steps above to ensure you have the correct version for your hardware and CUDA setup.)*
 
 ### Running the Flapping Demo
 
-The main example is a Jupyter Notebook.
+The main example is a Jupyter Notebook. After installing the package, you can run the demo.
 
 1.  Start a Jupyter server (e.g., JupyterLab):
     ```bash
@@ -75,7 +80,7 @@ The main example is a Jupyter Notebook.
 
 2.  Navigate to the `notebooks/` directory and open the `Flapping Demo.ipynb` file.
 
-3.  You can run the cells in the notebook to set up, run, and visualize the deformable flapping simulation.
+3.  You can run the cells in the notebook to set up, run, and visualize the deformable flapping simulation. Because you installed the package, the `import jax_ib` statement will work correctly.
 
 ## Core Concepts of the Deformable Model
 
