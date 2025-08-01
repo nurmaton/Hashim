@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jax_ib"
+version = "0.2.0" # Updated version for the new deformable features
+authors = [
+  { name="Nurmaton", email="your.email@example.com" }, # CHANGE THIS
+]
+description = "A JAX-based differentiable Immersed Boundary Method for deformable bodies."
+readme = "README.md"
+license = { text="Apache 2.0" }
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering",
+]
+dependencies = [
+    "jax",
+    "jax-md",
+    "numpy",
+    "scipy",
+    "tree-math",
+    "tqdm",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/nurmaton/Hashim"
+"Bug Tracker" = "https://github.com/nurmaton/Hashim/issues"
+
+[project.optional-dependencies]
+data = [
+    "matplotlib",
+    "seaborn",
+]
+tests = [
+    "absl-py",
+    "pytest",
+]
+complete = ["jax_ib[data,tests]"]
