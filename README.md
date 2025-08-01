@@ -78,7 +78,7 @@ The main example is a Jupyter Notebook. After installing the package, you can ru
     jupyter lab
     ```
 
-2.  Navigate to the `notebooks/` directory and open the `Flapping Demo.ipynb` file.
+2.  Navigate to the `notebooks/` directory and open the `Flapping_Demo.ipynb` file.
 
 3.  You can run the cells in the notebook to set up, run, and visualize the deformable flapping simulation. Because you installed the package, the `import jax_ib` statement will work correctly.
 
