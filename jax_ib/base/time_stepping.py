@@ -148,17 +148,7 @@ class ExplicitNavierStokesODE_BCtime:
   simulation with moving particles and diagnostics.
   """
 
-  def __init__(
-      self,
-      explicit_terms: Callable,
-      pressure_projection: Callable,
-      update_BC: Callable,
-      Reserve_BC: Callable,
-      IBM_force: Callable,
-      Update_Position: Callable,
-      Pressure_Grad: Callable,
-      Calculate_Drag: Callable
-  ):
+  def __init__(self, explicit_terms, pressure_projection, update_BC, Reserve_BC, IBM_force, Update_Position, Pressure_Grad, Calculate_Drag):
     """
     Initializes the comprehensive ODE definition object.
 
