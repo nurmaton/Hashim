@@ -14,7 +14,7 @@ The repository features two primary examples:
 
 ## Background and Acknowledgment
 
-This project, developed by [nurmaton](https://github.com/nurmaton) in collaboration with [khusrave](https://github.com/khusrave), is an adaptation and extension of the original `jax_ib` framework developed by Mohammed Alhashim, available at:
+This project, developed in collaboration with [khusrave](https://github.com/khusrave), is an adaptation and extension of the original `jax_ib` framework developed by Mohammed Alhashim, available at:
 *   **Original Repository:** [https://github.com/hashimmg/jax_ib](https://github.com/hashimmg/jax_ib)
 
 The original project was a groundbreaking differentiable solver for **rigid bodies**, as described in the PNAS paper:
