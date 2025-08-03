@@ -99,8 +99,7 @@ The two sets of markers are connected by stiff springs that generate a **penalty
 
 If you use this code in your research, please consider citing the original works that this project is based on:
 
-
-
+```bibtex
 @article{alhashim2025control,
   title={Control of flow behavior in complex fluids using automatic differentiation},
   author={Alhashim, Mohammed G and Hausknecht, Kaylie and Brenner, Michael P},
