@@ -4,9 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jax_ib"
-version = "0.2.0" # Updated version for the new deformable features
+version = "0.2.0"
 authors = [
-  { name="Nurmaton", email="your.email@example.com" }, # CHANGE THIS
+  { name="Nurmaton", email="your.email@example.com" },
+  { name="khusrave", email="khusrave.email@example.com" }, # Added collaborator
 ]
 description = "A JAX-based differentiable Immersed Boundary Method for deformable bodies."
 readme = "README.md"
@@ -20,6 +21,7 @@ classifiers = [
 ]
 dependencies = [
     "jax",
+    "jax-cfd",
     "jax-md",
     "numpy",
     "scipy",
