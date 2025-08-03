@@ -4,15 +4,17 @@ This repository contains a [JAX](https://github.com/google/jax)-based implementa
 
 The entire simulation is constructed as a JAX PyTree, making the solver end-to-end differentiable. This allows for the use of gradient-based optimization to solve inverse problems, such as discovering optimal flapping motions or material properties for an immersed object.
 
-The primary example in this repository is the `Flapping_Demo.ipynb`, which simulates a flexible, ellipse-like object flapping and deforming in a fluid, driven by internal physical forces.
+The repository features two primary examples:
+1.  **`Flapping_Demo.ipynb`**: Simulates a single, flexible, ellipse-like object flapping and deforming in a fluid, driven by internal physical forces.
+2.  **`Flapping_Demo_Multiple.ipynb`**: Showcases the framework's ability to handle multiple, distinct deformable bodies interacting with the fluid simultaneously. Each body has its own unique mass, shape, and material properties.
 
-<!-- Recommendation: Create a GIF of your flapping demo notebook output and replace this comment with the markdown for it! Example: ![Flapping Demo GIF](path/to/your/demo.gif) -->
+<!-- Recommendation: Create a GIF of your multi-particle demo and replace this comment! Example: ![Multi-Flapping Demo GIF](path/to/your/multi_demo.gif) -->
 
 ---
 
 ## Background and Acknowledgment
 
-This project, developed in collaboration with [khusrave](https://github.com/khusrave), is an adaptation and extension of the original `jax_ib` framework developed by Mohammed Alhashim, available at:
+This project, developed by [nurmaton](https://github.com/nurmaton) in collaboration with [khusrave](https://github.com/khusrave), is an adaptation and extension of the original `jax_ib` framework developed by Mohammed Alhashim, available at:
 *   **Original Repository:** [https://github.com/hashimmg/jax_ib](https://github.com/hashimmg/jax_ib)
 
 The original project was a groundbreaking differentiable solver for **rigid bodies**, as described in the PNAS paper:
@@ -69,18 +71,20 @@ All specific Python package dependencies are listed in the `pyproject.toml` file
 
 *(**Important Note on JAX:** For GPU/TPU support, you may need a specific version of `jaxlib`. Please follow the official [JAX installation instructions](https://github.com/google/jax#installation) *after* the steps above to ensure you have the correct version for your hardware and CUDA setup.)*
 
-### Running the Flapping Demo
+### Running the Demos
 
-The main example is a Jupyter Notebook. After installing the package, you can run the demo.
+The example simulations are provided as Jupyter Notebooks.
 
 1.  Start a Jupyter server (e.g., JupyterLab):
     ```bash
     jupyter lab
     ```
 
-2.  Navigate to the `notebooks/` directory and open the `Flapping_Demo.ipynb` file.
+2.  Navigate to the `notebooks/` directory.
 
-3.  You can run the cells in the notebook to set up, run, and visualize the deformable flapping simulation. Because you installed the package, the `import jax_ib` statement will work correctly.
+3.  You can open either notebook to run a simulation:
+    *   **`Flapping_Demo.ipynb`**: The foundational example with a single deformable body.
+    *   **`Flapping_Demo_Multiple.ipynb`**: The more advanced example showcasing three distinct deformable bodies interacting in the same fluid domain.
 
 ## Core Concepts of the Deformable Model
 
@@ -95,7 +99,8 @@ The two sets of markers are connected by stiff springs that generate a **penalty
 
 If you use this code in your research, please consider citing the original works that this project is based on:
 
-```bibtex
+
+
 @article{alhashim2025control,
   title={Control of flow behavior in complex fluids using automatic differentiation},
   author={Alhashim, Mohammed G and Hausknecht, Kaylie and Brenner, Michael P},
