@@ -78,103 +78,47 @@ def interpolate_velocity_to_surface(velocity_field, xp, yp, discrete_fn):
 # --- HEAVILY REWRITTEN CORE FUNCTION ---
 def update_massive_deformable_particle(all_variables, dt, gravity_g=0.0):
     """
-    Updates the state of a massive, deformable particle for one time step.
-
-    OLD vs NEW COMPARISON & EXPLANATION:
-    - WHY THE CHANGE WAS MADE: The OLD code was for a KINEMATIC model where motion
-      was pre-defined. The NEW function implements the DYNAMIC equations of motion
-      for the penalty IBM, where motion is CALCULATED from physical forces.
-    - KEY DIFFERENCES:
-      1. LOGIC: Old code used a math function (`Displacement_EQ`) to find the next
-         position. New code implements the full physics: it advects the fluid markers (X)
-         with the local fluid velocity (Eq. 3) and accelerates the mass markers (Y)
-         using Newton's Second Law with penalty and gravity forces (Eq. 5).
-      2. INTERPOLATION: Old code didn't need to know the fluid velocity at the particle.
-         New code CRITICALLY relies on `interpolate_velocity_to_surface` to advect the
-         fluid markers.
-      3. STATE MANAGEMENT: Old code just updated the `particle_center`. New code returns a
-         completely new `all_variables` object with the fully updated state of ALL
-         marker positions and velocities. This is a robust, functional approach
-         required for JAX.
-    - WHY THE NEW METHOD IS BETTER: It simulates the actual physics of a deformable
-      object, allowing complex behaviors like deformation and sedimentation to emerge naturally.
-
-    Args:
-      all_variables: The complete state of the simulation.
-      dt: The time step duration.
-      gravity_g: The acceleration due to gravity.
-
-    Returns:
-      A new `All_Variables` object with the particle state advanced by `dt`.
+    Updates the state of ALL massive, deformable particles for one time step.
+    This corrected version iterates through every particle in the container.
     """
-    # Unpack the necessary data structures from the main state container.
-    particles_container = all_variables.particles
+    particles = all_variables.particles.particles
     velocity_field = all_variables.velocity
-    
-    # The delta function is the kernel used for all interpolation/spreading operations.
     discrete_fn = lambda dist, center, width: convolution_functions.delta_approx_logistjax(dist, center, width)
 
-    # This function operates on a single particle (the first in the list).
-    # This could be extended to a loop or `jax.vmap` for multiple particles.
-    particle = particles_container.particles[0] 
-    
-    # --- 1. Advect Fluid Markers (X) using the IBM Integral (Eq. 3) ---
-    # First, find the velocity of the fluid at the location of the fluid markers.
-    U_fluid_x_pts, U_fluid_y_pts = interpolate_velocity_to_surface(
-        velocity_field, particle.xp, particle.yp, discrete_fn
-    )
-    
-    # Update the fluid marker positions with a simple forward Euler step.
-    # The fluid markers are massless and are simply carried along by the fluid flow.
-    new_xp = particle.xp + dt * U_fluid_x_pts
-    new_yp = particle.yp + dt * U_fluid_y_pts
+    updated_particle_list = []
 
-    # --- 2. Update Mass Markers (Y) using Newton's Second Law (Eq. 5) ---
-    # Calculate the internal spring force F = Kp(Y - X). This is the force
-    # exerted by the mass markers (Y) on the fluid markers (X).
-    penalty_force_x, penalty_force_y = IBM_Force.calculate_penalty_force(
-        particle.xp, particle.yp, particle.Ym_x, particle.Ym_y, particle.stiffness
-    )
+    # Loop over all particles (THIS IS THE FIX)
+    for particle in particles:
+        U_fluid_x_pts, U_fluid_y_pts = interpolate_velocity_to_surface(
+            velocity_field, particle.xp, particle.yp, discrete_fn
+        )
+        new_xp = particle.xp + dt * U_fluid_x_pts
+        new_yp = particle.yp + dt * U_fluid_y_pts
 
-    # By Newton's third law, the force on the mass markers is equal and opposite.
-    # We also include the force of gravity.
-    # F_net_on_Y = -F_penalty - M*g
-    net_force_on_Ym_x = -penalty_force_x
-    net_force_on_Ym_y = -penalty_force_y - (particle.mass_per_marker * gravity_g)
+        penalty_force_x, penalty_force_y = IBM_Force.calculate_penalty_force(
+            particle.xp, particle.yp, particle.Ym_x, particle.Ym_y, particle.stiffness
+        )
+        net_force_on_Ym_x = -penalty_force_x
+        net_force_on_Ym_y = -penalty_force_y - (particle.mass_per_marker * gravity_g)
+        accel_x = net_force_on_Ym_x / particle.mass_per_marker
+        accel_y = net_force_on_Ym_y / particle.mass_per_marker
+        new_Vm_x = particle.Vm_x + dt * accel_x
+        new_Vm_y = particle.Vm_y + dt * accel_y
+        new_Ym_x = particle.Ym_x + dt * new_Vm_x
+        new_Ym_y = particle.Ym_y + dt * new_Vm_y
+        new_center = jnp.array([[jnp.mean(new_Ym_x), jnp.mean(new_Ym_y)]])
 
-    # Calculate acceleration from F=ma -> a = F/m.
-    accel_x = net_force_on_Ym_x / particle.mass_per_marker
-    accel_y = net_force_on_Ym_y / particle.mass_per_marker
+        updated_particle = pc.particle(
+            xp=new_xp, yp=new_yp, Ym_x=new_Ym_x, Ym_y=new_Ym_y,
+            Vm_x=new_Vm_x, Vm_y=new_Vm_y,
+            mass_per_marker=particle.mass_per_marker, stiffness=particle.stiffness, sigma=particle.sigma,
+            particle_center=new_center, geometry_param=particle.geometry_param,
+            Grid=particle.Grid, shape=particle.shape
+        )
+        updated_particle_list.append(updated_particle)
 
-    # Update the mass marker velocities with a forward Euler step: v_new = v_old + a*dt.
-    new_Vm_x = particle.Vm_x + dt * accel_x
-    new_Vm_y = particle.Vm_y + dt * accel_y
-    
-    # Update the mass marker positions: y_new = y_old + v_new*dt.
-    # Using the *new* velocity here makes this a semi-implicit Euler step,
-    # which is slightly more stable than a standard forward Euler step.
-    new_Ym_x = particle.Ym_x + dt * new_Vm_x
-    new_Ym_y = particle.Ym_y + dt * new_Vm_y
-    
-    # Update the overall particle center based on the mean of mass markers (for tracking/diagnostics).
-    new_center = jnp.array([[jnp.mean(new_Ym_x), jnp.mean(new_Ym_y)]])
+    new_particles_container = pc.particle_lista(particles=updated_particle_list)
 
-    # --- 3. Create the new particle object with the updated state ---
-    # We create a brand new `particle` object. This "out-of-place" update is
-    # a core concept in functional programming and is required by JAX.
-    updated_particle = pc.particle(
-        xp=new_xp, yp=new_yp, Ym_x=new_Ym_x, Ym_y=new_Ym_y,
-        Vm_x=new_Vm_x, Vm_y=new_Vm_y,
-        mass_per_marker=particle.mass_per_marker, stiffness=particle.stiffness, sigma=particle.sigma,
-        particle_center=new_center, geometry_param=particle.geometry_param,
-        Grid=particle.Grid, shape=particle.shape
-    )
-    
-    # --- 4. Rebuild the container holding the list of particles ---
-    new_particles_container = pc.particle_lista(particles=[updated_particle])
-    
-    # --- 5. Return a new All_Variables instance with the updated fields ---
-    # The entire state of the simulation is replaced with this new object.
     return pc.All_Variables(
         particles=new_particles_container,
         velocity=all_variables.velocity,
