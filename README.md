@@ -1,10 +1,10 @@
-# JAX-IB: A Differentiable Immersed Boundary Method for Deformable Bodies
+<img width="285" height="25" alt="image" src="https://github.com/user-attachments/assets/fa8e931a-4809-4911-a0f3-9864a89f0c5f" /># JAX-IB: A Differentiable Immersed Boundary Method for Deformable Bodies
 
 This repository contains a [JAX](https://github.com/google/jax)-based implementation of the Immersed Boundary (IB) method for simulating Fluid-Structure Interaction (FSI), with a focus on **dynamic, deformable bodies**.
 
 The entire simulation is constructed as a JAX PyTree, making the solver end-to-end differentiable. This allows for the use of gradient-based optimization to solve inverse problems, such as discovering optimal material properties or control strategies for an immersed object.
 
-The primary example in this repository is the `Deformable_Droplet_Demo.ipynb`. This notebook first runs a forward simulation of a deformable droplet settling under gravity, and then demonstrates how to use differentiation to solve an inverse problem: automatically discovering the droplet's physical stiffness required to match a target shape.
+The primary example in this repository is the `Deformable_Droplet_Demo.ipynb`. This notebook first runs a forward simulation of a deformable droplet settling under gravity. It then demonstrates how to solve an inverse problem by using differentiation to automatically discover the physical stiffness required to make the droplet's final state match a predefined target shape.
 
 <!-- Recommendation: Create a GIF of your final optimization plot and place it here! -->
 <!-- Example: ![Optimization Demo GIF](notebooks/assets/optimization.gif) -->
