@@ -1,4 +1,4 @@
-JAX-IB: A Differentiable Immersed Boundary Method for Deformable Bodies
+# JAX-IB: A Differentiable Immersed Boundary Method for Deformable Bodies
 
 This repository contains a [JAX](https://github.com/google/jax)-based implementation of the Immersed Boundary (IB) method for simulating Fluid-Structure Interaction (FSI), with a focus on **dynamic, deformable bodies**.
 
